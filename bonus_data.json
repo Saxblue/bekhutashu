@@ -1,0 +1,26 @@
+{
+  "bonuses": {
+    "Kod Etkinliği": {
+      "title": "Kod Etkinliği Bonus Şartları",
+      "content": "📌 Temel Şartlar:\n- Son işlem etkinlik olmamalıdır\n- 3 gün içerisinde minimum 500₺ yatırım gereklidir\n- Bakiye 500₺'ye ulaştıktan sonra:\n  • 150₺ yatırım yapılabilir\n  • 300₺ olarak çekim talebi oluşturulabilir\n\n📌 Çevrim Şartları:\n- FreeSpin'in 1 katı\n- Ana paranın 1 katı çevrim yapılmalıdır\n- Çevrim sonrası tüm casino oyunlarında bahis alınabilir\n- Çekim sırasında 300₺ üzerindeki bakiye düzenlenecektir\n\n📌 Geçerli Oyunlar:\n• Sweet Bonanza\n• Gate of Olympus\n• Starlight Princess"
+    },
+    "Turnuva Ödülleri": {
+      "title": "Turnuva Ödülleri Ödeme Şartları",
+      "content": "📌 Çevrim Kuralı:\n- Turnuva kazançlarının çekilebilmesi için 1 kat ana para çevrimi gereklidir\n- Çevrim tamamlandıktan sonra maksimum çekim tutarı, kazanılan turnuva ödülünün 20 katıdır\n- Fazla bakiye mevcutsa, çekim esnasında bakiye düzenlenecektir\n\n📌 Dikkat Edilmesi Gerekenler:\n- Çekim süresi 7 gün olup, bu sürede çevrim yapılmaz veya çekim gerçekleşmezse bakiye silinir\n- Turnuva kazançları yalnızca ana bakiyeden gerçek para ile oynanan bahislerle kazanılan puanlara göre hesaplanır\n- Bonus bakiyesinden oynanan oyunlar turnuva puanı vermez"
+    },
+    "Casino Hoşgeldin": {
+      "title": "%100 Casino Hoşgeldin Bonusu",
+      "content": "📌 Bonus Detayları:\n- Tüm yatırım yöntemleri ile geçerlidir\n- Minimum 50 TL yatırım yapılmalıdır\n- İlk yatırımda maksimum 1000 TL bonus\n- Ana parayı 1 kez ve bonusu minimum 10 kat çevrim\n- Maksimum çekim 10.000 TL"
+    },
+    "Spor Hoşgeldin": {
+      "title": "%100 Spor Hoşgeldin Bonusu",
+      "content": "📌 Bonus Detayları:\n- Tüm yatırım yöntemleri ile alınabilir\n- Minimum 50 TL yatırım yapılmalıdır\n- İlk yatırımda maksimum 1000 TL bonus\n- Ana parayı 1 kez, bonusu minimum 1.40 oran ile 5 kez çevrim\n- Maksimum çekim 10.000 TL"
+    },
+    "deneme amaçlı yazıyorum": {
+      "title": "deneme amaçlı yazıyorum",
+      "content": "Kurbağa Çorbası içenlar "
+    }
+  },
+  "last_updated": "2025-02-12T05:52:48.053714",
+  "version": "1.0"
+}
