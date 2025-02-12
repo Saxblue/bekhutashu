@@ -19,8 +19,12 @@
     "Kurbağa bonusu": {
       "title": "Kurbağa bonusu",
       "content": "Bonus içeriğini buraya girin..."
+    },
+    "mırnav": {
+      "title": "mırnav",
+      "content": "Bonus içeriğini buraya girin..."
     }
   },
-  "last_updated": "2025-02-12T06:05:01.246508",
+  "last_updated": "2025-02-12T06:09:28.195870",
   "version": "1.0"
 }
