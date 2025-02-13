@@ -63,7 +63,11 @@
     "SMS  Doğum Günü Bonusu": {
       "title": "SMS  Doğum Günü Bonusu",
       "content": "Bonus, SMS gönderilen üyeler için canlı destek aracılığıyla tanımlanır ve aşağıdaki kurallar geçerlidir:\n\nBonus Detayları:\nBonus Tutarı: 100₺\nÇevrim Şartı: Bonustan kazanılan miktarın çekilebilir hale gelmesi için 3 kat çevrim yapılması yeterlidir.\nYatırım Şartı: Bonus talebi için yatırım yapılması gerekmiyor.\nMinimum Çekim: 300₺\nMaksimum Çekim: 500₺\n\nBonus Kullanım ve Denetim Kuralları:\n\nKYC (Kimlik Doğrulama):\nÇekim talebi sırasında kimlik doğrulama (KYC) işlemleri yapılmalı.\nÜyenin hesabındaki bilgilerin eksiksiz ve doğru olması gerekir.\n\nIP Kontrolü:\nBonusun adil şekilde kullanılmasını sağlamak için IP adresi kontrol edilir.\nAynı IP adresinden birden fazla hesap ile talep veya bonus kullanımı tespit edilirse, bonus iptal edilebilir.\n\nDoğum Günü Koşulu:\nBonus yalnızca SMS ile bilgilendirilen üyelere tanımlanır.\nÜyenin doğum günü bilgisi doğrulandıktan sonra bonus canlı destek tarafından hesabına eklenir.\n\nUsulsüzlük Durumu:\nEğer usulsüzlük (örneğin, aynı IP’den birden fazla bonus kullanımı) tespit edilirse, bonus iptal edilir ve üyenin hesabına işlem yapılamaz."
+    },
+    "kereste": {
+      "title": "kereste",
+      "content": "hnbdfvdbfgdfhngbfvdc"
     }
   },
-  "last_updated": "2025-02-14T01:01:45.945360"
+  "last_updated": "2025-02-14T01:02:42.012554"
 }
