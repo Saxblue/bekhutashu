@@ -1,1 +1,9 @@
-
+{
+    "BONUSLAR": [
+        {"title": "%10 HAFTALIK İADE BONUSU...", "tooltip": "Haftalık kayıplarınız için %10 iade bonusu alabilirsiniz."},
+        {"title": "%10 ÇEVRİMSİZ SPOR YATIRIM...", "tooltip": "Spor bahislerine yaptığınız yatırımlarda %10 çevrimsiz bonus."}
+    ],
+    "CALL CENTER": [
+        {"title": "İletişim Bilgileri", "tooltip": "Müşteri hizmetleri ile iletişime geçmek için bilgiler."}
+    ]
+}
