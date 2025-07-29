@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 import json
 import pandas as pd
-import pyperclip
 from datetime import datetime, timedelta
 import os
 import pytz
