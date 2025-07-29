@@ -92,7 +92,7 @@ def load_config():
     """Konfigürasyon dosyasından ayarları yükle"""
     config_file = "config.json"
     default_config = {
-        "token": "1b863692babcc0b483fbb23ea27beccc0f8ce3c44f93f0ef999555a5a46708a4",
+        "token": "2582007cbe97f891cf5fe69f4f2d44b002c021e6fca4c8276dc0accf4098d5fe",
         "api_url": "https://backofficewebadmin.betconstruct.com/api/tr/Client/GetClientWithdrawalRequestsWithTotals"
     }
     
