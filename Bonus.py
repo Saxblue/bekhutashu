@@ -23,6 +23,82 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# Sağ üst köşeye kırmızı nokta butonu ekle
+st.markdown("""
+<style>
+.red-dot-container {
+    position: fixed;
+    top: 60px;
+    right: 20px;
+    z-index: 999;
+}
+
+.red-dot {
+    width: 12px;
+    height: 12px;
+    background-color: #ff4444;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    transition: all 0.3s ease;
+    animation: pulse 2s infinite;
+}
+
+.red-dot:hover {
+    background-color: #ff0000;
+    transform: scale(1.2);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+}
+
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(255, 68, 68, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(255, 68, 68, 0);
+    }
+}
+
+.tooltip {
+    position: relative;
+    display: inline-block;
+}
+
+.tooltip .tooltiptext {
+    visibility: hidden;
+    width: 120px;
+    background-color: #333;
+    color: white;
+    text-align: center;
+    border-radius: 6px;
+    padding: 5px;
+    position: absolute;
+    z-index: 1;
+    bottom: 125%;
+    left: 50%;
+    margin-left: -60px;
+    opacity: 0;
+    transition: opacity 0.3s;
+    font-size: 12px;
+}
+
+.tooltip:hover .tooltiptext {
+    visibility: visible;
+    opacity: 1;
+}
+</style>
+
+<div class="red-dot-container">
+    <div class="tooltip">
+        <div class="red-dot" onclick="window.open('https://cekimraporu.streamlit.app/', '_blank')"></div>
+        <span class="tooltiptext">Çekim Raporu</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
 # ========================= UTILITY FUNCTIONS =========================
 
 def format_currency(amount):
@@ -93,6 +169,136 @@ def create_summary_report(df):
     
     except Exception as e:
         print(f"Özet rapor oluşturma hatası: {str(e)}")
+        return pd.DataFrame()
+
+
+def export_summary_to_excel(df, filename=None):
+    """Özet raporları Excel'e aktarma fonksiyonu - Streamlit Cloud uyumlu"""
+    try:
+        if df.empty:
+            st.error("Veri bulunamadı. Excel export yapılamaz.")
+            return None, None
+        
+        # Dosya adı oluştur
+        if not filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"bonus_ozet_raporu_{timestamp}.xlsx"
+        
+        # Bellek buffer oluştur
+        buffer = BytesIO()
+        
+        # Streamlit Cloud için xlsxwriter kullan
+        try:
+            with pd.ExcelWriter(buffer, engine='xlsxwriter', options={'remove_timezone': True}) as writer:
+                # Ana veri sayfası
+                df.to_excel(writer, sheet_name='Ana Veri', index=False)
+                
+                # Kullanıcı bazlı özet rapor
+                summary_report = create_summary_report(df)
+                if not summary_report.empty:
+                    summary_report.to_excel(writer, sheet_name='Kullanici Ozeti', index=False)
+                
+                # Bonus türü bazlı özet rapor
+                bonus_type_summary = create_bonus_type_summary(df)
+                if not bonus_type_summary.empty:
+                    bonus_type_summary.to_excel(writer, sheet_name='Bonus Turu Ozeti', index=False)
+                
+                # Günlük özet rapor
+                daily_summary = create_daily_summary(df)
+                if not daily_summary.empty:
+                    daily_summary.to_excel(writer, sheet_name='Gunluk Ozet', index=False)
+                
+                # Workbook ve formatlar
+                workbook = writer.book
+                header_format = workbook.add_format({
+                    'bold': True,
+                    'text_wrap': True,
+                    'valign': 'top',
+                    'fg_color': '#D7E4BC',
+                    'border': 1
+                })
+                
+                # Her sayfa için stil uygula
+                for sheet_name in writer.sheets:
+                    worksheet = writer.sheets[sheet_name]
+                    
+                    # Header formatı uygula ve sütun genişliklerini ayarla
+                    if sheet_name == 'Ana Veri':
+                        data_for_width = df
+                    elif sheet_name == 'Kullanici Ozeti':
+                        data_for_width = summary_report
+                    elif sheet_name == 'Bonus Turu Ozeti':
+                        data_for_width = bonus_type_summary
+                    elif sheet_name == 'Gunluk Ozet':
+                        data_for_width = daily_summary
+                    else:
+                        continue
+                    
+                    # Sütun genişlikleri ayarla
+                    for col_num, value in enumerate(data_for_width.columns.values):
+                        worksheet.write(0, col_num, value, header_format)
+                        try:
+                            max_len = max(
+                                data_for_width[value].astype(str).map(len).max(),
+                                len(str(value))
+                            )
+                            worksheet.set_column(col_num, col_num, min(max_len + 2, 50))
+                        except:
+                            worksheet.set_column(col_num, col_num, 15)
+            
+            buffer.seek(0)
+            return buffer.getvalue(), filename
+            
+        except Exception as xlsxwriter_error:
+            st.error(f"xlsxwriter hatası: {str(xlsxwriter_error)}")
+            # Fallback: basit Excel export
+            try:
+                buffer = BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df.to_excel(writer, sheet_name='Ana Veri', index=False)
+                buffer.seek(0)
+                return buffer.getvalue(), filename
+            except Exception as openpyxl_error:
+                st.error(f"openpyxl fallback hatası: {str(openpyxl_error)}")
+                return None, None
+        
+    except Exception as e:
+        st.error(f"Excel export genel hatası: {str(e)}")
+        return None, None
+
+
+def create_daily_summary(df):
+    """Günlük bonus özet raporu oluştur"""
+    try:
+        if df.empty or 'Tarih' not in df.columns or 'Miktar' not in df.columns:
+            return pd.DataFrame()
+        
+        # Tarih sütununu datetime'a çevir
+        df_copy = df.copy()
+        df_copy['Tarih'] = pd.to_datetime(df_copy['Tarih'], errors='coerce')
+        df_copy['Gün'] = df_copy['Tarih'].dt.date
+        
+        # Günlük gruplama
+        daily_summary = df_copy.groupby('Gün').agg({
+            'Miktar': ['count', 'sum'],
+            'Kullanıcı ID': 'nunique'
+        }).reset_index()
+        
+        # Sütun adlarını düzelt
+        daily_summary.columns = ['Tarih', 'Toplam İşlem', 'Toplam Miktar', 'Benzersiz Kullanıcı']
+        
+        # Miktarları formatla
+        daily_summary['Toplam Miktar Formatted'] = daily_summary['Toplam Miktar'].apply(lambda x: format_currency(x))
+        
+        # Görüntüleme sütunları
+        display_columns = ['Tarih', 'Toplam İşlem', 'Toplam Miktar Formatted', 'Benzersiz Kullanıcı']
+        daily_summary_display = daily_summary[display_columns].copy()
+        daily_summary_display.columns = ['Tarih', 'Toplam İşlem', 'Toplam Miktar', 'Benzersiz Kullanıcı']
+        
+        return daily_summary_display.sort_values('Tarih', ascending=False)
+        
+    except Exception as e:
+        print(f"Günlük özet rapor hatası: {str(e)}")
         return pd.DataFrame()
 
 
@@ -452,39 +658,53 @@ class BonusAPIHandler:
             return pd.DataFrame()
     
     def create_excel_export(self, df):
-        """DataFrame'i Excel formatında export et"""
+        """DataFrame'i Excel formatında export et - Streamlit Cloud basit çözüm"""
         try:
             if df.empty:
+                st.error("DataFrame boş - Excel oluşturulamaz")
                 return None
             
-            # Bellek buffer oluştur
+            st.info(f"Excel oluşturuluyor... Satır sayısı: {len(df)}")
+            
+            # En basit yöntem: sadece openpyxl
             buffer = BytesIO()
             
-            # Excel writer oluştur
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df.to_excel(writer, sheet_name='Bonus Raporu', index=False)
+            try:
+                # Basit Excel export - hiçbir özel format yok
+                df.to_excel(buffer, index=False, engine='openpyxl')
+                buffer.seek(0)
                 
-                # Worksheet'e stil ekle
-                worksheet = writer.sheets['Bonus Raporu']
+                excel_data = buffer.getvalue()
+                if len(excel_data) > 0:
+                    st.success(f"Excel dosyası başarıyla oluşturuldu! Boyut: {len(excel_data)} byte")
+                    return excel_data
+                else:
+                    st.error("Excel dosyası boş oluştu")
+                    return None
+                    
+            except ImportError as import_error:
+                st.error(f"Kütüphane eksik: {str(import_error)}")
+                st.info("Streamlit Cloud'da openpyxl kütüphanesi eksik olabilir")
+                return None
                 
-                # Sütun genişlikleri ayarla
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    for cell in column:
-                        try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
-                    adjusted_width = min(max_length + 2, 50)
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
-            
-            buffer.seek(0)
-            return buffer.getvalue()
+            except Exception as excel_error:
+                st.error(f"Excel oluşturma hatası: {str(excel_error)}")
+                st.info("Hata detayı: Excel dosyası oluşturulamadı")
+                
+                # Son çare: CSV olarak export
+                try:
+                    st.warning("Excel başarısız, CSV deneniyor...")
+                    csv_buffer = BytesIO()
+                    df.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
+                    csv_buffer.seek(0)
+                    return csv_buffer.getvalue()
+                except Exception as csv_error:
+                    st.error(f"CSV export da başarısız: {str(csv_error)}")
+                    return None
             
         except Exception as e:
-            print(f"Excel export hatası: {str(e)}")
+            st.error(f"Genel hata: {str(e)}")
+            st.info("Debug: Excel export fonksiyonu tamamen başarısız")
             return None
 
 
@@ -763,7 +983,7 @@ def main():
                 except Exception as e:
                     st.error(f"Excel export hatası: {str(e)}")
 
-            # Özet Rapor
+            # Özet Rapor - Bonus - Kopya.py'deki çalışan versiyona uygun
             if st.button("📈 Özet Rapor Oluştur", use_container_width=True):
                 try:
                     # Kullanıcı bazlı özet rapor (hangi kullanıcı kaç defa aldı)
@@ -773,16 +993,28 @@ def main():
                         st.subheader("👥 Kullanıcı Bazlı Özet (Hangi kullanıcı kaç defa aldı)")
                         st.dataframe(user_summary, use_container_width=True)
                         
-                        # Kullanıcı özet raporu Excel export
-                        excel_buffer = st.session_state.api_handler.create_excel_export(user_summary)
-                        if excel_buffer:
-                            st.download_button(
-                                label="📥 Kullanıcı Özet Raporunu İndir",
-                                data=excel_buffer,
-                                file_name=f"kullanici_ozet_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True
-                            )
+                        # Kullanıcı özet raporu Excel export - Streamlit Cloud için geliştirilmiş
+                        try:
+                            excel_buffer = st.session_state.api_handler.create_excel_export(user_summary)
+                            if excel_buffer:
+                                # Session state'e kaydet
+                                st.session_state.user_summary_excel = excel_buffer
+                                st.session_state.user_summary_filename = f"kullanici_ozet_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx"
+                                
+                                # Download button'u hemen göster
+                                st.download_button(
+                                    label="📥 Kullanıcı Özet Raporunu İndir",
+                                    data=excel_buffer,
+                                    file_name=f"kullanici_ozet_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True,
+                                    key="user_summary_download"  # Unique key for Streamlit Cloud
+                                )
+                            else:
+                                st.error("Excel dosyası oluşturulamadı")
+                        except Exception as excel_error:
+                            st.error(f"Excel oluşturma hatası: {str(excel_error)}")
+                            st.write("Debug: Excel buffer oluşturma başarısız")
                         
                         st.divider()
                         
@@ -808,6 +1040,23 @@ def main():
 
                 except Exception as e:
                     st.error(f"Özet rapor hatası: {str(e)}")
+
+            # Streamlit Cloud için ayrı download bölümü
+            if hasattr(st.session_state, 'user_summary_excel') and st.session_state.user_summary_excel:
+                st.subheader("📥 İndirme Seçenekleri")
+                
+                # Kullanıcı özet raporu download
+                st.download_button(
+                    label="📥 Kullanıcı Özet Raporunu İndir (Yedek)",
+                    data=st.session_state.user_summary_excel,
+                    file_name=st.session_state.user_summary_filename,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="backup_user_summary_download"
+                )
+                
+                st.info("ℹ️ Eğer yukarıdaki indirme butonu görünmüyorsa, bu yedek butonu kullanabilirsiniz.")
+                st.divider()
 
         # Temizle
         if st.button("🗑️ Sonuçları Temizle", use_container_width=True):
