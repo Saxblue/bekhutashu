@@ -3,192 +3,452 @@ BetConstruct Bonus Raporu - Tek Dosya Versiyonu
 Streamlit web uygulaması - API entegrasyonu, tarih filtreleme ve Excel export özellikleri ile
 """
 
-import streamlit as st
-import pandas as pd
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+from tkinter import font as tkfont
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+from ttkthemes import ThemedTk
+import pandas as pd
+from datetime import datetime, timedelta
 import json
 import os
-from datetime import datetime, timedelta
-from io import BytesIO
-import time
-import random
 
-# Sayfa konfigürasyonu
-st.set_page_config(
-    page_title="BetConstruct Bonus Raporu",
-    page_icon="💰",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
-# ========================= UTILITY FUNCTIONS =========================
-
-def format_currency(amount):
-    """Para birimi formatla (Türk Lirası)"""
-    try:
-        if pd.isna(amount) or amount == "" or amount is None:
-            return "0,00 TL"
+class SettingsWindow(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Ayarlar - Şifre Gerekli")
+        self.geometry("400x300")
+        self.resizable(False, False)
         
-        # Sayıya çevir
-        if isinstance(amount, str):
-            amount = float(amount.replace(',', '.'))
+        self.parent = parent
+        self.settings_file = "settings.json"
+        self.settings = self.load_settings()
         
-        # Formatla
-        return f"{amount:,.2f} TL".replace(',', 'X').replace('.', ',').replace('X', '.')
+        # Şifre kontrolü
+        self.password_frame = ttk.Frame(self)
+        self.password_frame.pack(pady=20, padx=20, fill=tk.X)
+        
+        ttk.Label(self.password_frame, text="Ayarlara erişmek için şifre girin:").pack()
+        self.password_entry = ttk.Entry(self.password_frame, show="*")
+        self.password_entry.pack(pady=5, fill=tk.X)
+        
+        self.password_button = ttk.Button(self.password_frame, text="Giriş", command=self.check_password)
+        self.password_button.pack(pady=5)
+        
+        # Ayarlar paneli (başlangıçta gizli)
+        self.settings_frame = ttk.LabelFrame(self, text="API Ayarları")
+        
+        ttk.Label(self.settings_frame, text="Authentication Key:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.auth_key_entry = ttk.Entry(self.settings_frame, width=50)
+        self.auth_key_entry.grid(row=0, column=1, sticky=tk.EW, pady=2, padx=5)
+        
+        ttk.Label(self.settings_frame, text="Referer:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.referer_entry = ttk.Entry(self.settings_frame)
+        self.referer_entry.grid(row=1, column=1, sticky=tk.EW, pady=2, padx=5)
+        
+        ttk.Label(self.settings_frame, text="Origin:").grid(row=2, column=0, sticky=tk.W, pady=2)
+        self.origin_entry = ttk.Entry(self.settings_frame)
+        self.origin_entry.grid(row=2, column=1, sticky=tk.EW, pady=2, padx=5)
+        
+        self.save_button = ttk.Button(self.settings_frame, text="Kaydet", command=self.save_settings)
+        self.save_button.grid(row=3, column=0, columnspan=2, pady=10)
+        
+        # Şifre doğruysa ayarları yükle
+        if self.settings.get("authenticated", False):
+            self.show_settings()
     
-    except:
-        return '-'
-
-
-def format_date_for_api(date_obj):
-    """Tarihi BetConstruct API için formatla (dd-mm-yy - HH:MM:SS)"""
-    try:
-        if isinstance(date_obj, str):
-            # String ise parse et
-            date_obj = datetime.strptime(date_obj, '%Y-%m-%d').date()
+    def load_settings(self):
+        default_settings = {
+            "auth_key": "5bb38a3120522e0c9342c9253343989e2e7a40bf551d819c0bc16cb21348928e",
+            "referer": "https://backoffice.betconstruct.com/",
+            "origin": "https://backoffice.betconstruct.com",
+            "authenticated": False
+        }
         
-        # datetime.date objesini datetime'a çevir (saat 00:00:00 ile)
-        if hasattr(date_obj, 'year'):
-            dt = datetime.combine(date_obj, datetime.min.time())
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, "r") as f:
+                    return json.load(f)
+        except:
+            pass
+            
+        return default_settings
+    
+    def check_password(self):
+        if self.password_entry.get() == "Omlet2025?":
+            self.settings["authenticated"] = True
+            self.show_settings()
         else:
-            dt = date_obj
-        
-        # BetConstruct formatına çevir: dd-mm-yy - HH:MM:SS
-        return dt.strftime("%d-%m-%y - %H:%M:%S")
-    except:
-        return '-'
-
-
-def create_summary_report(df):
-    """Kullanıcı bazlı bonus özet raporu oluştur - Orijinal koda uygun"""
-    try:
-        if df.empty:
-            return pd.DataFrame()
-        
-        if 'Kullanıcı ID' not in df.columns or 'Bonus Türü' not in df.columns or 'Miktar' not in df.columns:
-            return pd.DataFrame()
-        
-        # Kullanıcı ve bonus türü bazlı gruplama
-        user_bonus_summary = df.groupby(['Kullanıcı ID', 'Kullanıcı Adı', 'Bonus Türü']).agg({
-            'Miktar': ['count', 'sum']
-        }).reset_index()
-        
-        # MultiIndex sütunları düzelt
-        user_bonus_summary.columns = ['Kullanıcı ID', 'Kullanıcı Adı', 'Bonus Türü', 'Kaç Defa Aldı', 'Toplam Miktar']
-        
-        # Miktarları formatla
-        user_bonus_summary['Toplam Miktar Formatted'] = user_bonus_summary['Toplam Miktar'].apply(lambda x: format_currency(x))
-        
-        # Sıralama (önce toplam miktara göre, sonra kullanıcı ID'ye göre)
-        user_bonus_summary = user_bonus_summary.sort_values(['Toplam Miktar', 'Kullanıcı ID'], ascending=[False, True])
-        
-        # Görüntüleme için sütun sırası
-        display_columns = ['Kullanıcı ID', 'Kullanıcı Adı', 'Bonus Türü', 'Kaç Defa Aldı', 'Toplam Miktar Formatted']
-        user_bonus_summary_display = user_bonus_summary[display_columns].copy()
-        user_bonus_summary_display.columns = ['Kullanıcı ID', 'Kullanıcı Adı', 'Bonus Türü', 'Kaç Defa Aldı', 'Toplam Miktar']
-        
-        return user_bonus_summary_display
+            messagebox.showerror("Hata", "Yanlış şifre!")
     
-    except Exception as e:
-        print(f"Özet rapor oluşturma hatası: {str(e)}")
-        return pd.DataFrame()
-
-
-def create_bonus_type_summary(df):
-    """Bonus türü bazlı özet rapor oluştur"""
-    try:
-        if df.empty:
-            return pd.DataFrame()
+    def show_settings(self):
+        self.password_frame.pack_forget()
+        self.settings_frame.pack(pady=20, padx=20, fill=tk.BOTH, expand=True)
         
-        # Bonus türlerine göre gruplama
-        if 'Bonus Türü' not in df.columns:
-            return pd.DataFrame()
+        # Ayarları entry'lere yükle
+        self.auth_key_entry.delete(0, tk.END)
+        self.auth_key_entry.insert(0, self.settings.get("auth_key", ""))
         
-        summary = df.groupby('Bonus Türü').agg({
-            'Kullanıcı ID': 'count',
-            'Miktar': ['sum', 'mean'],
-            'Para Birimi': 'first'
-        }).reset_index()
+        self.referer_entry.delete(0, tk.END)
+        self.referer_entry.insert(0, self.settings.get("referer", ""))
         
-        # MultiIndex sütunları düzelt
-        summary.columns = ['Bonus Türü', 'Adet', 'Toplam Miktar', 'Ortalama Miktar', 'Para Birimi']
-        
-        # Formatla
-        summary['Toplam Miktar'] = summary['Toplam Miktar'].apply(lambda x: format_currency(x))
-        summary['Ortalama Miktar'] = summary['Ortalama Miktar'].apply(lambda x: format_currency(x))
-        
-        # Toplam satırı ekle
-        total_row = pd.DataFrame({
-            'Bonus Türü': ['TOPLAM'],
-            'Adet': [df['Kullanıcı ID'].count()],
-            'Toplam Miktar': [format_currency(df['Miktar'].sum())],
-            'Ortalama Miktar': [format_currency(df['Miktar'].mean())],
-            'Para Birimi': ['TL']
+        self.origin_entry.delete(0, tk.END)
+        self.origin_entry.insert(0, self.settings.get("origin", ""))
+    
+    def save_settings(self):
+        self.settings.update({
+            "auth_key": self.auth_key_entry.get(),
+            "referer": self.referer_entry.get(),
+            "origin": self.origin_entry.get(),
+            "authenticated": True
         })
         
-        summary = pd.concat([summary, total_row], ignore_index=True)
+        with open(self.settings_file, "w") as f:
+            json.dump(self.settings, f)
         
-        return summary
-    
-    except Exception as e:
-        print(f"Bonus türü özet rapor oluşturma hatası: {str(e)}")
-        return pd.DataFrame()
+        self.parent.update_api_settings(self.settings)
+        messagebox.showinfo("Başarılı", "Ayarlar kaydedildi!")
+        self.destroy()
 
-
-# ========================= API HANDLER CLASS =========================
-
-class BonusAPIHandler:
-    def __init__(self, auth_key=None):
-        self.base_url = "https://backofficewebadmin.betconstruct.com/api/tr/Report/GetClientBonusReport"
-        self.auth_key = auth_key or os.getenv("BETCONSTRUCT_AUTH_KEY", "affe433a578d139ed6aa4e3c02bbdd7e341719493c31e3c39a8ee60711aaeb75")
-        self.referer = "https://backoffice.betconstruct.com/"
-        self.origin = "https://backoffice.betconstruct.com"
-    
-    def update_settings(self, settings):
-        """API ayarlarını güncelle"""
-        self.auth_key = settings.get("auth_key", self.auth_key)
-        self.referer = settings.get("referer", self.referer)
-        self.origin = settings.get("origin", self.origin)
-    
-    def get_headers(self):
-        """API istekleri için header oluştur - Daha basit ve etkili versiyon"""
-        return {
-            "Authentication": self.auth_key,
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "Referer": self.referer,
-            "Origin": self.origin,
-            "X-Requested-With": "XMLHttpRequest"
+class BonusReportApp:
+    def __init__(self):
+        self.window = ThemedTk(theme="arc")
+        self.window.title("BetConstruct Bonus Raporu")
+        self.window.geometry("1200x800")
+        self.window.minsize(1000, 600)
+        
+        # Stiller
+        self.title_font = tkfont.Font(family="Arial", size=16, weight="bold")
+        self.label_font = tkfont.Font(family="Arial", size=12)
+        self.button_font = tkfont.Font(family="Arial", size=11)
+        
+        # Menü Çubuğu
+        self.create_menu()
+        
+        # Ana içerik
+        self.create_main_content()
+        
+        # API Ayarları
+        self.settings_window = None
+        self.api_settings = {
+            "bonus_api_url": "https://backofficewebadmin.betconstruct.com/api/tr/Report/GetClientBonusReport",
+            "headers": {
+                "Authentication": "5bb38a3120522e0c9342c9253343989e2e7a40bf551d819c0bc16cb21348928e",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "Referer": "https://backoffice.betconstruct.com/",
+                "Origin": "https://backoffice.betconstruct.com",
+                "X-Requested-With": "XMLHttpRequest"
+            }
         }
+        
+        # Excel için veri listesi
+        self.bonus_data = []
+        
+        # Ayarları yükle
+        self.load_settings()
+        
+        self.window.mainloop()
     
-    def build_request_payload(self, filters):
-        """API isteği için payload oluştur - Tkinter versiyonuna uygun"""
+    def create_menu(self):
+        menubar = tk.Menu(self.window)
+        
+        # Dosya menüsü
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Excel'e Kaydet", command=self.save_bonus_to_excel)
+        file_menu.add_command(label="Temizle", command=self.clear_results)
+        file_menu.add_separator()
+        file_menu.add_command(label="Çıkış", command=self.window.quit)
+        menubar.add_cascade(label="Dosya", menu=file_menu)
+        
+        # Ayarlar menüsü
+        settings_menu = tk.Menu(menubar, tearoff=0)
+        settings_menu.add_command(label="API Ayarları", command=self.open_settings)
+        menubar.add_cascade(label="Ayarlar", menu=settings_menu)
+        
+        self.window.config(menu=menubar)
+    
+    def create_main_content(self):
+        # Ana çerçeve
+        main_frame = ttk.Frame(self.window)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Başlık
+        ttk.Label(main_frame, text="BetConstruct Bonus Raporu", 
+                 font=self.title_font).pack(pady=10)
+        
+        # Açıklama
+        ttk.Label(main_frame, text="Tarih aralığını seçin ve o dönemde alınan tüm bonusları görüntüleyin.", 
+                 font=self.label_font).pack(pady=5)
+        
+        # Filtreler
+        filter_frame = ttk.LabelFrame(main_frame, text="Filtreler", padding=10)
+        filter_frame.pack(fill=tk.X, pady=5)
+        
+        # İlk satır - Tarih aralığı
+        row1_frame = ttk.Frame(filter_frame)
+        row1_frame.pack(fill=tk.X, pady=2)
+        
+        ttk.Label(row1_frame, text="Başlangıç Tarihi:").pack(side=tk.LEFT, padx=5)
+        self.start_date = ttk.Entry(row1_frame, width=12)
+        self.start_date.pack(side=tk.LEFT, padx=2)
+        self.start_date_btn = ttk.Button(row1_frame, text="📅", width=3, command=lambda: self.open_calendar('start'))
+        self.start_date_btn.pack(side=tk.LEFT, padx=2)
+        
+        ttk.Label(row1_frame, text="Bitiş Tarihi:").pack(side=tk.LEFT, padx=5)
+        self.end_date = ttk.Entry(row1_frame, width=12)
+        self.end_date.pack(side=tk.LEFT, padx=2)
+        self.end_date_btn = ttk.Button(row1_frame, text="📅", width=3, command=lambda: self.open_calendar('end'))
+        self.end_date_btn.pack(side=tk.LEFT, padx=2)
+        
+        # Varsayılan tarih aralığını ayarla (son 7 gün)
+        today = datetime.now()
+        start_date = today - timedelta(days=7)
+        
+        start_format = start_date.strftime("%d-%m-%y")
+        end_format = today.strftime("%d-%m-%y")
+        
+        self.start_date.insert(0, start_format)
+        self.end_date.insert(0, end_format)
+        
+        # İkinci satır - İsteğe bağlı filtreler
+        row2_frame = ttk.Frame(filter_frame)
+        row2_frame.pack(fill=tk.X, pady=2)
+        
+        ttk.Label(row2_frame, text="Kullanıcı ID (isteğe bağlı):").pack(side=tk.LEFT, padx=5)
+        self.client_id = ttk.Entry(row2_frame, width=15)
+        self.client_id.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(row2_frame, text="Bonus Türü:").pack(side=tk.LEFT, padx=5)
+        bonus_types = ["Tüm Bonuslar", "%10 ÇEVRİMSİZ SPOR BONUSU", "%100  SLOT BONUSU", 
+                      "%100 CASİNO HOŞGELDİN BONUSU", "%100 PRAGMATİC SALI - PERŞEMBE",
+                      "%100 SPOR HOŞGELDİN BONUSU", "%25 SPOR YATIRIM BONUSU", 
+                      "%5 CASİNO HAFTALIK", "%5 SPOR HAFTALIK", "250 TL CASİNO DENEME BONUSU",
+                      "250 TL DOĞUM GÜNÜ CASİNO BONUSU", "250 TL SPOR DENEME BONUSU",
+                      "CASİNO BAĞLILIK BONUSU", "CASİNO CALL DAVET", "CASİNO ÇEVRİMSİZ BONUS",
+                      "CASİNO DOĞUM GÜNÜ BONUSU", "CASİNO KAYIP BONUSU", 
+                      "P.TESİ & ÇARŞAMBA %100 GÜNÜN İLK KAYIBINA", "SPOR BAĞLILIK BONUSU",
+                      "SPOR CALL DAVET", "SPOR ÇEVRİMSİZ BONUS", "SPOR DOĞUM GÜNÜ BONUSU",
+                      "SPOR KAYIP BONUSU", "YENİ CASİNO ŞANS BONUSU"]
+        self.bonus_type_combo = ttk.Combobox(row2_frame, values=bonus_types, state="readonly", width=25)
+        self.bonus_type_combo.set("Tüm Bonuslar")
+        self.bonus_type_combo.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(row2_frame, text="Maksimum Kayıt:").pack(side=tk.LEFT, padx=5)
+        self.max_rows = ttk.Entry(row2_frame, width=8)
+        self.max_rows.pack(side=tk.LEFT, padx=5)
+        self.max_rows.insert(0, "100")
+        
+        # Butonlar
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=10)
+        
+        self.fetch_btn = ttk.Button(button_frame, text="Bonus Raporunu Getir", command=self.fetch_bonus_report)
+        self.fetch_btn.pack(side=tk.LEFT, padx=5)
+        
+        self.save_btn = ttk.Button(button_frame, text="Excel'e Kaydet", command=self.save_bonus_to_excel)
+        self.save_btn.pack(side=tk.LEFT, padx=5)
+        self.save_btn.config(state=tk.DISABLED)
+        
+        self.summary_btn = ttk.Button(button_frame, text="Özet Rapor Oluştur", command=self.create_summary_report)
+        self.summary_btn.pack(side=tk.LEFT, padx=5)
+        self.summary_btn.config(state=tk.DISABLED)
+        
+        self.clear_btn = ttk.Button(button_frame, text="Temizle", command=self.clear_results)
+        self.clear_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Sonuçlar Alanı
+        results_frame = ttk.LabelFrame(main_frame, text="Bonus Raporu", padding=10)
+        results_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # Treeview (tablo) oluştur
+        self.create_results_treeview(results_frame)
+        
+        # Durum çubuğu
+        self.status_var = tk.StringVar()
+        self.status_var.set("Hazır")
+        status_bar = ttk.Label(main_frame, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.pack(fill=tk.X, pady=(5, 0))
+    
+    def create_results_treeview(self, parent):
+        # Treeview ve scrollbar için çerçeve
+        tree_frame = ttk.Frame(parent)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Sütunlar tanımla
+        columns = ("Kullanıcı ID", "Kullanıcı Adı", "Bonus ID", "Bonus Türü", "Miktar", "Para Birimi", "Durum", "Tarih")
+        
+        self.results_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=20)
+        
+        # Sütun başlıklarını ayarla
+        column_widths = {
+            "Kullanıcı ID": 100,
+            "Kullanıcı Adı": 150,
+            "Bonus ID": 80,
+            "Bonus Türü": 200,
+            "Miktar": 100,
+            "Para Birimi": 80,
+            "Durum": 100,
+            "Tarih": 150
+        }
+        
+        for col in columns:
+            self.results_tree.heading(col, text=col)
+            self.results_tree.column(col, width=column_widths[col], minwidth=60)
+        
+        # Scrollbar ekle
+        scrollbar_y = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.results_tree.yview)
+        scrollbar_x = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=self.results_tree.xview)
+        
+        self.results_tree.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+        
+        # Yerleştir
+        self.results_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+        scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
+    
+    def open_calendar(self, date_type):
+        """Takvim açıp tarih seçimini sağlar"""
+        calendar_window = tk.Toplevel(self.window)
+        calendar_window.title("Tarih Seç")
+        calendar_window.geometry("300x250")
+        calendar_window.resizable(False, False)
+        
+        # Takvim widget'ı
+        import calendar as cal
+        
+        # Şu anki tarihi al
+        now = datetime.now()
+        
+        # Yıl ve ay seçimi
+        year_month_frame = ttk.Frame(calendar_window)
+        year_month_frame.pack(pady=10)
+        
+        ttk.Label(year_month_frame, text="Yıl:").pack(side=tk.LEFT, padx=5)
+        year_var = tk.StringVar(value=str(now.year))
+        year_combo = ttk.Combobox(year_month_frame, textvariable=year_var, width=6)
+        year_combo['values'] = [str(y) for y in range(2020, now.year + 2)]
+        year_combo.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(year_month_frame, text="Ay:").pack(side=tk.LEFT, padx=5)
+        month_var = tk.StringVar(value=str(now.month))
+        month_combo = ttk.Combobox(year_month_frame, textvariable=month_var, width=4)
+        month_combo['values'] = [str(m) for m in range(1, 13)]
+        month_combo.pack(side=tk.LEFT, padx=5)
+        
+        # Takvim gösterimi
+        calendar_frame = ttk.Frame(calendar_window)
+        calendar_frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
+        
+        # Günler için butonlar
+        self.day_buttons = []
+        
+        def update_calendar():
+            # Önceki butonları temizle
+            for btn in self.day_buttons:
+                btn.destroy()
+            self.day_buttons.clear()
+            
+            year = int(year_var.get())
+            month = int(month_var.get())
+            
+            # Haftanın günleri
+            days = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz']
+            for i, day in enumerate(days):
+                ttk.Label(calendar_frame, text=day, font=('Arial', 8, 'bold')).grid(row=0, column=i, padx=1, pady=1)
+            
+            # Ayın günleri
+            month_calendar = cal.monthcalendar(year, month)
+            for week_num, week in enumerate(month_calendar, 1):
+                for day_num, day in enumerate(week):
+                    if day == 0:
+                        continue
+                    
+                    btn = ttk.Button(calendar_frame, text=str(day), width=3,
+                                   command=lambda d=day: select_date(d))
+                    btn.grid(row=week_num, column=day_num, padx=1, pady=1)
+                    self.day_buttons.append(btn)
+        
+        def select_date(day):
+            year = int(year_var.get())
+            month = int(month_var.get())
+            selected_date = datetime(year, month, day)
+            formatted_date = selected_date.strftime("%d-%m-%y")
+            
+            if date_type == 'start':
+                self.start_date.delete(0, tk.END)
+                self.start_date.insert(0, formatted_date)
+            else:
+                self.end_date.delete(0, tk.END)
+                self.end_date.insert(0, formatted_date)
+            
+            calendar_window.destroy()
+        
+        # İlk takvimi göster
+        update_calendar()
+        
+        # Ay/yıl değiştiğinde takvimi güncelle
+        year_combo.bind('<<ComboboxSelected>>', lambda e: update_calendar())
+        month_combo.bind('<<ComboboxSelected>>', lambda e: update_calendar())
+    
+    def fetch_bonus_report(self):
         try:
-            # Tarihleri string'e çevir
-            start_date = format_date_for_api(filters["start_date"])
-            end_date = format_date_for_api(filters["end_date"])
+            # Butonları devre dışı bırak
+            self.fetch_btn.config(state=tk.DISABLED)
+            self.status_var.set("Bonus raporu çekiliyor...")
+            self.window.update_idletasks()
             
-            # Debug log
-            print(f"Start date: {start_date}")
-            print(f"End date: {end_date}")
+            # Tabloyu temizle
+            for item in self.results_tree.get_children():
+                self.results_tree.delete(item)
             
-            # Tkinter versiyonuna uygun payload yapısı
+            # Parametreleri al ve kontrol et
+            start_date = self.start_date.get().strip()
+            end_date = self.end_date.get().strip()
+            client_id = self.client_id.get().strip()
+            bonus_type = self.bonus_type_combo.get()
+            max_rows = self.max_rows.get().strip()
+            
+            if not start_date or not end_date:
+                messagebox.showerror("Hata", "Lütfen başlangıç ve bitiş tarihlerini girin!")
+                return
+            
+            # Tarih formatını kontrol et ve düzelt
+            try:
+                start_dt = datetime.strptime(start_date, "%d-%m-%y")
+                end_dt = datetime.strptime(end_date, "%d-%m-%y")
+                
+                # API için uygun formata çevir
+                start_formatted = start_dt.strftime("%d-%m-%y - 00:00:00")
+                end_formatted = end_dt.strftime("%d-%m-%y - 23:59:59")
+                
+            except ValueError:
+                messagebox.showerror("Hata", "Tarih formatı hatalı! Lütfen dd-mm-yy formatında girin (örn: 21-07-25)")
+                return
+            
+            # Maksimum kayıt sayısını kontrol et
+            try:
+                max_rows_int = int(max_rows) if max_rows else 100
+                if max_rows_int <= 0:
+                    max_rows_int = 100
+            except ValueError:
+                max_rows_int = 100
+            
+            # Request payload'u oluştur
             payload = {
                 "ClientBonusId": "",
-                "ClientId": str(filters.get("client_id", "")),
+                "ClientId": client_id if client_id else "",
                 "PartnerBonusId": "",
                 "AcceptanceType": None,
-                "BonusType": "1" if filters.get("bonus_type") == "Casino Kayıp Bonusu" else None,
+                "BonusType": "1" if bonus_type == "Casino Kayıp Bonusu" else None,
                 "BonusSource": None,
                 "ByPassTotals": False,
                 "EndDateLocal": None,
                 "IsTest": None,
-                "MaxRows": filters.get("max_rows", 100),
-                "PartnerBonusEndDateLocal": end_date,
-                "PartnerBonusStartDateLocal": start_date,
+                "MaxRows": max_rows_int,
+                "PartnerBonusEndDateLocal": end_formatted,
+                "PartnerBonusStartDateLocal": start_formatted,
                 "ResultFromDateLocal": None,
                 "ResultToDateLocal": None,
                 "ResultType": None,
@@ -198,647 +458,318 @@ class BonusAPIHandler:
                 "ToCurrencyId": "TRY"
             }
             
-            # Debug log
-            print(f"Payload: {json.dumps(payload, indent=2)}")
+            # API çağrısı yap
+            response = requests.post(
+                self.api_settings["bonus_api_url"], 
+                headers=self.api_settings["headers"], 
+                json=payload
+            )
             
-            return payload
-            
+            if response.status_code == 200:
+                try:
+                    # API yanıtını kontrol et
+                    content_type = response.headers.get('content-type', '')
+                    if 'application/json' not in content_type:
+                        error_msg = f"API yanıtı JSON formatında değil. Content-Type: {content_type}\nYanıt: {response.text[:500]}"
+                        self.status_var.set("API yanıt formatı hatası.")
+                        messagebox.showerror("Format Hatası", error_msg)
+                        return
+                    
+                    data = response.json()
+                    
+                    # API yanıt kontrolü
+                    if data.get('HasError', False):
+                        error_msg = f"API Hatası: {data.get('AlertMessage', 'Bilinmeyen hata')}"
+                        self.status_var.set("API hatası.")
+                        messagebox.showerror("API Hatası", error_msg)
+                        return
+                    
+                    # BetConstruct API yanıt yapısına göre bonus listesini al
+                    bonus_list = None
+                    
+                    if isinstance(data, dict) and "Data" in data:
+                        data_obj = data["Data"]
+                        if isinstance(data_obj, dict) and "ClientBonusReportData" in data_obj:
+                            bonus_report_data = data_obj["ClientBonusReportData"]
+                            if isinstance(bonus_report_data, dict) and "Objects" in bonus_report_data:
+                                bonus_list = bonus_report_data["Objects"]
+                    
+                    if bonus_list and len(bonus_list) > 0:
+                        self.bonus_data = []
+                        
+                        for bonus in bonus_list:
+                            if isinstance(bonus, dict):
+                                # API yanıtından doğru alan isimlerini kullan
+                                client_id = str(bonus.get("ClientId", ""))
+                                client_login = str(bonus.get("ClientName", ""))  # ClientName alanı kullanıcı adını içeriyor
+                                bonus_id = str(bonus.get("Id", ""))  # Id alanı bonus ID'si
+                                bonus_name = str(bonus.get("Name", ""))  # Name alanı bonus türünü içeriyor
+                                amount = float(bonus.get("Amount", 0))
+                                currency = str(bonus.get("ClientCurrency", "TRY"))  # ClientCurrency alanı para birimini içeriyor
+                                acceptance_type = bonus.get("AcceptanceType", 0)
+                                creation_time = str(bonus.get("AcceptanceDateLocal", ""))  # AcceptanceDateLocal kabul tarihini içeriyor
+                                
+                                # Bonus türü filtrelemesi
+                                if bonus_type != "Tüm Bonuslar":
+                                    if bonus_name.strip().upper() != bonus_type.upper():
+                                        continue
+                                
+                                # Treeview'a ekle
+                                self.results_tree.insert("", "end", values=(
+                                    str(client_id),
+                                    str(client_login),
+                                    str(bonus_id),
+                                    str(bonus_name),
+                                    f"{float(amount):.2f}",
+                                    str(currency),
+                                    self.get_bonus_status(acceptance_type),
+                                    str(creation_time)
+                                ))
+                                
+                                # Excel için veriyi sakla
+                                self.bonus_data.append({
+                                    "Kullanıcı ID": str(client_id),
+                                    "Kullanıcı Adı": str(client_login),
+                                    "Bonus ID": str(bonus_id),
+                                    "Bonus Türü": str(bonus_name),
+                                    "Miktar": float(amount),
+                                    "Para Birimi": str(currency),
+                                    "Durum": self.get_bonus_status(acceptance_type),
+                                    "Tarih": str(creation_time)
+                                })
+                        
+                        # Filtreleme sonrası kayıt sayısını güncelle
+                        filtered_count = len(self.bonus_data)
+                        self.status_var.set(f"Toplam {filtered_count} bonus kaydı bulundu.")
+                        self.save_btn.config(state=tk.NORMAL)
+                        self.summary_btn.config(state=tk.NORMAL)
+                        
+                    else:
+                        self.status_var.set("Belirtilen kriterlerde bonus kaydı bulunamadı.")
+                        messagebox.showinfo("Bilgi", f"Belirtilen kriterlerde bonus kaydı bulunamadı.\nAPI Yanıtı: {str(data)[:200]}")
+                        
+                except json.JSONDecodeError as e:
+                    error_msg = f"JSON decode hatası: {str(e)}\nYanıt: {response.text[:500]}"
+                    self.status_var.set("JSON decode hatası.")
+                    messagebox.showerror("JSON Hatası", error_msg)
+            else:
+                error_msg = f"API Hatası: {response.status_code}"
+                if response.text:
+                    error_msg += f"\nDetay: {response.text[:500]}"
+                
+                self.status_var.set("API hatası oluştu.")
+                messagebox.showerror("API Hatası", error_msg)
+                
         except Exception as e:
-            print(f"Payload oluşturma hatası: {str(e)}")
-            return {
-                "error": f"Payload oluşturma hatası: {str(e)}",
-                "details": {
-                    "start_date": str(filters.get("start_date")),
-                    "end_date": str(filters.get("end_date"))
-                }
-            }
+            error_msg = f"Bonus raporu çekilirken hata oluştu:\n{str(e)}"
+            self.status_var.set("Hata oluştu.")
+            messagebox.showerror("Hata", error_msg)
+            
+        finally:
+            # Butonları yeniden etkinleştir
+            self.fetch_btn.config(state=tk.NORMAL)
     
     def get_bonus_status(self, acceptance_type):
-        """Bonus durumunu çevir"""
+        """Bonus durumunu açıklayıcı metne çevir"""
         status_map = {
             0: "Beklemede",
-            1: "Onaylandı", 
+            1: "Onaylandı",
             2: "Reddedildi",
-            3: "İptal Edildi"
+            3: "İptal Edildi",
+            4: "Kullanıldı"
         }
-        return status_map.get(acceptance_type, "Bilinmeyen")
+        return status_map.get(acceptance_type, "Bilinmiyor")
     
-    def fetch_bonus_report(self, filters):
-        """BetConstruct API'den bonus raporu getir - CloudFlare bypass ile"""
-        try:
-            payload = self.build_request_payload(filters)
-            
-            if not payload:
-                return {
-                    "success": False,
-                    "error": "Payload oluşturulamadı",
-                    "data": pd.DataFrame()
-                }
-            
-            # Her denemede farklı IP adresi ve User-Agent varyasyonu
-            for attempt in range(5):  # Deneme sayısını artırma
-                try:
-                    # Her denemede farklı session
-                    session = requests.Session()
-                    
-                    # Retry stratejisi
-                    retry_strategy = Retry(
-                        total=3,
-                        backoff_factor=1.0,  # Daha uzun bekleme
-                        status_forcelist=[429, 500, 502, 503, 504],
-                        allowed_methods=["POST"]
-                    )
-                    
-                    adapter = HTTPAdapter(max_retries=retry_strategy)
-                    session.mount("http://", adapter)
-                    session.mount("https://", adapter)
-                    
-                    # Headers ayarla
-                    headers = self.get_headers()
-                    
-                    # Daha fazla User-Agent varyasyonu
-                    user_agents = [
-                        f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(120, 135)}.0.0.0 Safari/537.36",
-                        f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Firefox/{random.randint(120, 135)}.0 Safari/537.36",
-                        f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(120, 135)}.0.0.0 Safari/537.36",
-                        f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(120, 135)}.0.0.0 Safari/537.36",
-                        f"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:{random.randint(120, 135)}.0) Gecko/20100101 Firefox/{random.randint(120, 135)}.0"
-                    ]
-                    headers["User-Agent"] = random.choice(user_agents)
-                    
-                    # Daha fazla HTTP başlığı varyasyonu
-                    headers["Accept-Language"] = random.choice([
-                        "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-                        "en-US,en;q=0.9",
-                        "tr-TR,tr;q=0.8,en-US;q=0.7,en;q=0.6"
-                    ])
-                    
-                    # Daha fazla HTTP başlığı varyasyonu
-                    headers["Sec-Ch-Ua"] = random.choice([
-                        '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-                        '"Firefox";v="131", "Gecko";v="131", "Not_A Brand";v="24"',
-                        '"Safari";v="131", "WebKit";v="131", "Not_A Brand";v="24"'
-                    ])
-                    
-                    session.headers.update(headers)
-                    
-                    # Daha uzun ve rastgele bekleme süresi
-                    if attempt > 0:
-                        wait_time = random.uniform(2, 5)
-                        print(f"Waiting {wait_time:.1f} seconds before retry {attempt + 1}...")
-                        time.sleep(wait_time)
-                    
-                    # İsteği gönder
-                    response = session.post(
-                        self.base_url,
-                        json=payload,
-                        timeout=(30, 120),  # Timeout'u artırma
-                        verify=True,
-                        allow_redirects=False
-                    )
-                    
-                    # Response detaylarını logla
-                    print(f"Attempt {attempt + 1}: Status Code: {response.status_code}")
-                    print(f"Response Headers: {dict(response.headers)}")
-                    
-                    # 530 değilse başarılı, döngüden çık
-                    if response.status_code != 530:
-                        break
-                        
-                except requests.exceptions.RequestException as e:
-                    print(f"Request failed on attempt {attempt + 1}: {str(e)}")
-                    if attempt == 4:  # Son deneme
-                        raise e
-                    continue
-            
-            # Detaylı hata kontrolü
-            if response.status_code == 530:
-                return {
-                    "success": False,
-                    "error": "CloudFlare engeli - Lütfen Auth Key'inizi kontrol edin veya VPN kullanmayı deneyin",
-                    "data": pd.DataFrame(),
-                    "response_text": f"Status: {response.status_code}, Headers: {dict(response.headers)}"
-                }
-            elif response.status_code == 401:
-                return {
-                    "success": False,
-                    "error": "Yetkisiz erişim - Auth Key hatalı veya süresi dolmuş",
-                    "data": pd.DataFrame(),
-                    "response_text": response.text
-                }
-            elif response.status_code == 403:
-                return {
-                    "success": False,
-                    "error": "Erişim yasak - IP adresi veya Auth Key kısıtlaması",
-                    "data": pd.DataFrame(),
-                    "response_text": response.text
-                }
-            
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            # API yanıtını DataFrame'e çevir - bonus türleri filtresini geç
-            df = self.process_api_response(data, filters.get("bonus_types"))
-            
-            # Eğer sonuç yoksa ve bugünün tarihiyse, 23:59:59'a kadar olan verileri deneyelim
-            if df.empty and filters.get("end_date") == datetime.now().date():
-                # End date'i 23:59:59'a ayarla
-                payload["PartnerBonusEndDateLocal"] = datetime.combine(
-                    filters["end_date"], 
-                    datetime.max.time()
-                ).strftime("%d-%m-%y - %H:%M:%S")
-                
-                # Tekrar deneyelim
-                response = session.post(
-                    self.base_url,
-                    json=payload,
-                    timeout=(30, 120),
-                    verify=True,
-                    allow_redirects=False
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    df = self.process_api_response(data, filters.get("bonus_types"))
-                    
-            return {
-                "success": True,
-                "data": df,
-                "total_records": len(df)
-            }
-            
-        except requests.exceptions.RequestException as e:
-            error_msg = f"API isteği hatası: {str(e)}"
-            if "530" in str(e):
-                error_msg += " - CloudFlare koruması aktif olabilir"
-            elif "timeout" in str(e).lower():
-                error_msg += " - Bağlantı zaman aşımı"
-            elif "connection" in str(e).lower():
-                error_msg += " - Bağlantı problemi"
-            
-            return {
-                "success": False,
-                "error": error_msg,
-                "data": pd.DataFrame(),
-                "response_text": response.text if 'response' in locals() and response else 'Bağlantı kurulamadı'
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Genel hata: {str(e)}",
-                "data": pd.DataFrame(),
-                "response_text": response.text if 'response' in locals() and response else 'Genel hata'
-            }
-    
-    def process_api_response(self, api_data, bonus_types_filter=None):
-        """API yanıtını DataFrame formatına çevir - Çoklu bonus türü desteği ile"""
-        try:
-            # API hata kontrolü
-            if isinstance(api_data, dict) and api_data.get('HasError', False):
-                print(f"API Hatası: {api_data.get('AlertMessage', 'Bilinmeyen hata')}")
-                return pd.DataFrame()
-            
-            # BetConstruct API yanıt yapısına göre bonus listesini al
-            bonus_list = None
-            
-            if isinstance(api_data, dict) and "Data" in api_data:
-                data_obj = api_data["Data"]
-                if isinstance(data_obj, dict) and "ClientBonusReportData" in data_obj:
-                    bonus_report_data = data_obj["ClientBonusReportData"] 
-                    if isinstance(bonus_report_data, dict) and "Objects" in bonus_report_data:
-                        bonus_list = bonus_report_data["Objects"]
-            
-            if not bonus_list or len(bonus_list) == 0:
-                print(f"API Yanıtı: {str(api_data)[:200]}")
-                return pd.DataFrame()
-            
-            # DataFrame için veri listesi
-            processed_data = []
-            
-            for bonus in bonus_list:
-                if isinstance(bonus, dict):
-                    bonus_name = str(bonus.get("Name", ""))
-                    
-                    # Çoklu bonus türü filtrelemesi
-                    if bonus_types_filter and len(bonus_types_filter) > 0:
-                        # Seçilen bonus türlerinden herhangi biri ile eşleşiyor mu kontrol et
-                        bonus_match = False
-                        for selected_type in bonus_types_filter:
-                            if bonus_name.strip().upper() == selected_type.upper():
-                                bonus_match = True
-                                break
-                        
-                        # Eşleşme yoksa bu bonusu atla
-                        if not bonus_match:
-                            continue
-                    
-                    # API yanıtından doğru alan isimlerini kullan
-                    processed_data.append({
-                        'Kullanıcı ID': str(bonus.get("ClientId", "")),
-                        'Kullanıcı Adı': str(bonus.get("ClientName", "")),
-                        'Tarafından Oluşturuldu': str(bonus.get("CreatedByUserName", "")),
-                        'Bonus Türü': bonus_name,
-                        'Miktar': float(bonus.get("Amount", 0)),
-                        'Para Birimi': str(bonus.get("ClientCurrency", "TRY")),
-                        'Durum': self.get_bonus_status(bonus.get("AcceptanceType", 0)),
-                        'Tarih': str(bonus.get("AcceptanceDateLocal", ""))
-                    })
-            
-            return pd.DataFrame(processed_data)
-            
-        except Exception as e:
-            print(f"API yanıt işleme hatası: {str(e)}")
-            return pd.DataFrame()
-    
-    def create_excel_export(self, df):
-        """DataFrame'i Excel formatında export et"""
-        try:
-            if df.empty:
-                return None
-            
-            # Bellek buffer oluştur
-            buffer = BytesIO()
-            
-            # Excel writer oluştur
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df.to_excel(writer, sheet_name='Bonus Raporu', index=False)
-                
-                # Worksheet'e stil ekle
-                worksheet = writer.sheets['Bonus Raporu']
-                
-                # Sütun genişlikleri ayarla
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    for cell in column:
-                        try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
-                    adjusted_width = min(max_length + 2, 50)
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
-            
-            buffer.seek(0)
-            return buffer.getvalue()
-            
-        except Exception as e:
-            print(f"Excel export hatası: {str(e)}")
+    def get_user_details(self, client_id):
+        """Kullanıcı ID'si ile kullanıcı detaylarını getir"""
+        if not client_id:
             return None
-
-
-# ========================= SETTINGS FUNCTIONS =========================
-
-def load_settings():
-    """Ayarları JSON dosyasından yükle"""
-    settings_file = "settings.json"
-    default_settings = {
-        "auth_key": os.getenv("BETCONSTRUCT_AUTH_KEY", "2582007cbe97f891cf5fe69f4f2d44b002c021e6fca4c8276dc0accf4098d5fe"),
-        "referer": "https://backoffice.betconstruct.com/",
-        "origin": "https://backoffice.betconstruct.com"
-    }
-
-    try:
-        if os.path.exists(settings_file):
-            with open(settings_file, "r") as f:
-                return json.load(f)
-    except:
-        pass
-
-    return default_settings
-
-
-def save_settings(settings):
-    """Ayarları JSON dosyasına kaydet"""
-    try:
-        with open("settings.json", "w") as f:
-            json.dump(settings, f)
-        return True
-    except:
-        return False
-
-
-# ========================= MAIN APPLICATION =========================
-
-def main():
-    # Session state başlatma
-    if 'bonus_data' not in st.session_state:
-        st.session_state.bonus_data = pd.DataFrame()
-    
-    if 'api_handler' not in st.session_state:
-        settings = load_settings()
-        st.session_state.api_handler = BonusAPIHandler(settings.get("auth_key"))
-    
-    if 'settings' not in st.session_state:
-        st.session_state.settings = load_settings()
-
-    # Header - Kilit ikonu ile API ayarları
-    header_col1, header_col2 = st.columns([10, 1])
-    with header_col1:
-        st.title("🏆 BetConstruct Bonus Raporu")
-        st.markdown("Tarih aralığını seçin ve o dönemde alınan tüm bonusları görüntüleyin.")
-    
-    with header_col2:
-        if st.button("🔐", help="API Ayarları", key="api_settings_button"):
-            st.session_state.show_api_settings = not st.session_state.get("show_api_settings", False)
-
-    # API Ayarları Modal
-    if st.session_state.get("show_api_settings", False):
-        with st.container():
-            st.markdown("### ⚙️ API Ayarları")
+        
+        try:
+            user_url = f"https://backofficewebadmin.betconstruct.com/api/tr/Client/GetClientById?id={client_id}"
+            response = requests.get(user_url, headers=self.api_settings["headers"])
             
-            settings = load_settings()
-            
-            # Auth Key ayarı
-            auth_key = st.text_input(
-                "Authentication Key:",
-                value=settings.get("auth_key", ""),
-                type="password",
-                help="BetConstruct API Auth Key"
-            )
-            
-            referer = st.text_input(
-                "Referer:",
-                value=settings.get("referer", ""),
-                help="API Referer header"
-            )
-            
-            origin = st.text_input(
-                "Origin:",
-                value=settings.get("origin", ""),
-                help="API Origin header"
-            )
-            
-            col1, col2, col3 = st.columns([1, 1, 1])
-            
-            with col1:
-                if st.button("💾 Kaydet"):
-                    new_settings = {
-                        "auth_key": auth_key,
-                        "referer": referer,
-                        "origin": origin
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, dict) and "Data" in data:
+                    user_data = data["Data"]
+                    return {
+                        "username": user_data.get("UserName", ""),
+                        "firstName": user_data.get("FirstName", ""),
+                        "lastName": user_data.get("LastName", ""),
+                        "email": user_data.get("Email", "")
                     }
-                    if save_settings(new_settings):
-                        st.session_state.api_handler.update_settings(new_settings)
-                        st.success("✅ API ayarları güncellendi!")
-                    else:
-                        st.error("❌ Ayarlar kaydedilemedi!")
-                    st.session_state.show_api_settings = False
-                    st.rerun()
+        except Exception as e:
+            print(f"Kullanıcı detayı çekilirken hata: {e}")
+        
+        return None
+    
+    def create_summary_report(self):
+        """Seçilen bonus türü için özet rapor oluştur"""
+        if not self.bonus_data:
+            messagebox.showwarning("Uyarı", "Özet rapor için veri yok!")
+            return
+        
+        try:
+            # Özet rapor penceresi oluştur
+            summary_window = tk.Toplevel(self.window)
+            summary_window.title("Bonus Özet Raporu")
+            summary_window.geometry("800x600")
             
-            with col2:
-                if st.button("🔍 Test Et"):
-                    if auth_key:
-                        st.info("API bağlantısı test ediliyor...")
-                        
-                        # Test API handler oluştur
-                        test_handler = BonusAPIHandler(auth_key)
-                        test_handler.referer = referer or "https://backoffice.betconstruct.com/"
-                        test_handler.origin = origin or "https://backoffice.betconstruct.com"
-                        
-                        # Basit test isteği
-                        test_filters = {
-                            "start_date": datetime.now().date() - timedelta(days=1),
-                            "end_date": datetime.now().date(),
-                            "max_rows": 1
-                        }
-                        
-                        test_result = test_handler.fetch_bonus_report(test_filters)
-                        
-                        if test_result["success"]:
-                            st.success("✅ API bağlantısı başarılı!")
-                        else:
-                            st.error(f"❌ API testi başarısız: {test_result['error']}")
-                            
-                            with st.expander("Test Hata Detayları"):
-                                st.text(f"Auth Key: {auth_key[:20]}..." if len(auth_key) > 20 else auth_key)
-                                st.text(f"API URL: {test_handler.base_url}")
-                                if 'response_text' in test_result:
-                                    st.text(f"Yanıt: {test_result['response_text'][:200]}...")
-                    else:
-                        st.warning("⚠️ Auth Key giriniz!")
+            # Başlık
+            selected_bonus = self.bonus_type_combo.get()
+            ttk.Label(summary_window, text=f"Bonus Özet Raporu: {selected_bonus}", 
+                     font=self.title_font).pack(pady=10)
             
-            with col3:
-                if st.button("❌ Kapat"):
-                    st.session_state.show_api_settings = False
-                    st.rerun()
+            # Özet rapor tablosu
+            columns = ("Üye ID", "Kullanıcı Adı", "Alım Sayısı", "Bonus Türü", "Toplam Bonus")
             
-            # Troubleshooting rehberi
-            with st.expander("🔧 VPN ile 530 Error Çözümü"):
-                st.markdown("""
-                **VPN kullanırken 530 hatası alıyorsanız:**
-                1. **En Etkili:** VPN'i geçici olarak kapatın ve tekrar deneyin
-                2. VPN sunucu lokasyonunu değiştirin (Türkiye/Avrupa tercih edin)
-                3. VPN protokolünü değiştirin (OpenVPN → WireGuard veya tersi)
-                4. "Test Et" butonuna birkaç kez tıklayın (otomatik retry var)
+            summary_frame = ttk.Frame(summary_window)
+            summary_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            summary_tree = ttk.Treeview(summary_frame, columns=columns, show="headings", height=20)
+            
+            # Sütun başlıklarını ayarla
+            for col in columns:
+                summary_tree.heading(col, text=col)
+                summary_tree.column(col, width=150, minwidth=100)
+            
+            # Scrollbar ekle
+            scrollbar = ttk.Scrollbar(summary_frame, orient=tk.VERTICAL, command=summary_tree.yview)
+            summary_tree.configure(yscrollcommand=scrollbar.set)
+            
+            summary_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            # Veriyi grupla ve özetle
+            summary_data = {}
+            for bonus in self.bonus_data:
+                user_id = bonus["Kullanıcı ID"]
+                bonus_type = bonus["Bonus Türü"]
+                amount = bonus["Miktar"]
+                user_name = bonus["Kullanıcı Adı"]
                 
-                **Auth Key güncellemesi:**
-                1. BetConstruct back office'e tarayıcıdan giriş yapın
-                2. F12 → Network sekmesi → herhangi bir işlem yapın
-                3. İsteklerde Authorization: Bearer ... kısmını kopyalayın
-                4. Buraya yapıştırın
+                key = (user_id, bonus_type)
+                if key not in summary_data:
+                    summary_data[key] = {
+                        "user_id": user_id,
+                        "user_name": user_name,
+                        "bonus_type": bonus_type,
+                        "count": 0,
+                        "total_amount": 0
+                    }
                 
-                **Diğer çözümler:**
-                - İnternet bağlantınızı yenileyin
-                - Farklı bir cihazdan deneyin
-                - Auth Key'in başında/sonunda boşluk olmadığından emin olun
-                - Token'ın tam olarak kopyalandığından emin olun
-                
-                **Teknik detay:** Bu uygulama 3 farklı User-Agent ile otomatik deneme yapıyor ve CloudFlare bypass teknikleri kullanıyor.
-                """)
+                summary_data[key]["count"] += 1
+                summary_data[key]["total_amount"] += amount
             
-            st.divider()
-
-    # Ana içerik alanı
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        st.subheader("📅 Filtreler")
-
-        # Tarih aralığı
-        col_start, col_end = st.columns(2)
-
-        with col_start:
-            # Varsayılan başlangıç tarihi (7 gün önce)
-            default_start = datetime.now() - timedelta(days=7)
-            start_date = st.date_input("Başlangıç Tarihi:",
-                                       value=default_start,
-                                       max_value=datetime.now())
-
-        with col_end:
-            end_date = st.date_input("Bitiş Tarihi:",
-                                     value=datetime.now(),
-                                     max_value=datetime.now())
-
-        # Diğer filtreler
-        col_user, col_bonus = st.columns(2)
-
-        with col_user:
-            client_id = st.text_input("Kullanıcı ID (isteğe bağlı):")
-
-        with col_bonus:
-            bonus_types = [
-                "CASİNO KAYIP BONUSU", "%100  SLOT BONUSU",
-                "%100 CASİNO HOŞGELDİN BONUSU",
-                "%100 PRAGMATİC SALI - PERŞEMBE", "%100 SPOR HOŞGELDİN BONUSU",
-                "%25 SPOR YATIRIM BONUSU", "%5 CASİNO HAFTALIK",
-                "%5 SPOR HAFTALIK", "250 TL CASİNO DENEME BONUSU",
-                "250 TL DOĞUM GÜNÜ CASİNO BONUSU", "250 TL SPOR DENEME BONUSU",
-                "CASİNO BAĞLILIK BONUSU", "CASİNO CALL DAVET",
-                "CASİNO ÇEVRİMSİZ BONUS", "CASİNO DOĞUM GÜNÜ BONUSU",
-                "%10 ÇEVRİMSİZ SPOR BONUSU",
-                "P.TESİ & ÇARŞAMBA %100 GÜNÜN İLK KAYIBINA",
-                "SPOR BAĞLILIK BONUSU", "SPOR CALL DAVET",
-                "SPOR ÇEVRİMSİZ BONUS", "SPOR DOĞUM GÜNÜ BONUSU",
-                "SPOR KAYIP BONUSU", "YENİ CASİNO ŞANS BONUSU"
-            ]
-
-            selected_bonus_types = st.multiselect(
-                "Bonus Türleri (Birden fazla seçebilirsiniz):",
-                bonus_types,
-                help="Boş bırakırsanız tüm bonus türleri getirilir"
+            # Özet tablosuna veri ekle
+            for data in summary_data.values():
+                summary_tree.insert("", "end", values=(
+                    data["user_id"],
+                    data["user_name"],
+                    data["count"],
+                    data["bonus_type"],
+                    f"{data['total_amount']:.2f} TL"
+                ))
+            
+            # Excel'e kaydet butonu
+            button_frame = ttk.Frame(summary_window)
+            button_frame.pack(fill=tk.X, pady=10, padx=10)
+            
+            def save_summary():
+                try:
+                    date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = filedialog.asksaveasfilename(
+                        defaultextension=".xlsx",
+                        filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+                        title="Özet raporu kaydet",
+                        initialfile=f"bonus_ozet_{date_str}.xlsx"
+                    )
+                    
+                    if filename:
+                        summary_df = pd.DataFrame([
+                            {
+                                "Üye ID": data["user_id"],
+                                "Kullanıcı Adı": data["user_name"],
+                                "Alım Sayısı": data["count"],
+                                "Bonus Türü": data["bonus_type"],
+                                "Toplam Bonus": data["total_amount"]
+                            }
+                            for data in summary_data.values()
+                        ])
+                        summary_df.to_excel(filename, index=False)
+                        messagebox.showinfo("Başarılı", f"Özet rapor {filename} dosyasına kaydedildi!")
+                        
+                except Exception as e:
+                    messagebox.showerror("Hata", f"Özet rapor kaydedilirken hata oluştu: {str(e)}")
+            
+            ttk.Button(button_frame, text="Özet Raporu Excel'e Kaydet", command=save_summary).pack(side=tk.LEFT, padx=5)
+            ttk.Button(button_frame, text="Kapat", command=summary_window.destroy).pack(side=tk.RIGHT, padx=5)
+            
+        except Exception as e:
+            messagebox.showerror("Hata", f"Özet rapor oluşturulurken hata oluştu: {str(e)}")
+    
+    def save_bonus_to_excel(self):
+        if not self.bonus_data:
+            messagebox.showwarning("Uyarı", "Kaydedilecek bonus verisi yok!")
+            return
+        
+        try:
+            # Dosya adı önerisi
+            date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+                title="Bonus raporunu kaydet",
+                initialfile=f"bonus_raporu_{date_str}.xlsx"
             )
+            
+            if filename:
+                df = pd.DataFrame(self.bonus_data)
+                df.to_excel(filename, index=False)
+                messagebox.showinfo("Başarılı", f"Bonus raporu {filename} dosyasına kaydedildi!")
+                self.status_var.set(f"Rapor {os.path.basename(filename)} dosyasına kaydedildi.")
+                
+        except Exception as e:
+            messagebox.showerror("Hata", f"Excel dosyası kaydedilirken hata oluştu: {str(e)}")
+    
+    def clear_results(self):
+        # Tabloyu temizle
+        for item in self.results_tree.get_children():
+            self.results_tree.delete(item)
+        
+        # Veri listesini temizle
+        self.bonus_data = []
+        
+        # Durum çubuğunu sıfırla
+        self.status_var.set("Hazır")
+        
+        # Kaydet ve özet butonlarını devre dışı bırak
+        self.save_btn.config(state=tk.DISABLED)
+        self.summary_btn.config(state=tk.DISABLED)
+    
+    def open_settings(self):
+        if self.settings_window is None or not self.settings_window.winfo_exists():
+            self.settings_window = SettingsWindow(self)
+        else:
+            self.settings_window.lift()
+    
+    def update_api_settings(self, settings):
+        self.api_settings["headers"]["Authentication"] = settings["auth_key"]
+        self.api_settings["headers"]["Referer"] = settings["referer"]
+        self.api_settings["headers"]["Origin"] = settings["origin"]
+    
+    def load_settings(self):
+        try:
+            if os.path.exists("settings.json"):
+                with open("settings.json", "r") as f:
+                    settings = json.load(f)
+                    self.update_api_settings(settings)
+        except:
+            pass
 
-        max_rows = st.number_input("Maksimum Kayıt:",
-                                   min_value=1,
-                                   max_value=10000,
-                                   value=2000)
-
-    with col2:
-        st.subheader("⚡ İşlemler")
-
-        # Butonlar
-        if st.button("🔍 Bonus Raporunu Getir",
-                     type="primary",
-                     use_container_width=True):
-            if start_date > end_date:
-                st.error("Başlangıç tarihi bitiş tarihinden sonra olamaz!")
-            else:
-                with st.spinner("Bonus raporu getiriliyor..."):
-                    try:
-                        filters = {
-                            "start_date": start_date,
-                            "end_date": end_date,
-                            "client_id": client_id.strip() if client_id else None,
-                            "bonus_types": selected_bonus_types if selected_bonus_types else None,
-                            "max_rows": max_rows
-                        }
-
-                        result = st.session_state.api_handler.fetch_bonus_report(filters)
-
-                        if result["success"]:
-                            st.session_state.bonus_data = result["data"]
-                            st.success(f"✅ {result['total_records']} kayıt getirildi!")
-                        else:
-                            st.error(f"❌ {result['error']}")
-                            st.session_state.bonus_data = pd.DataFrame()
-                            
-                            with st.expander("Hata Detayları"):
-                                st.text(f"API URL: {st.session_state.api_handler.base_url}")
-                                st.text(f"Filtreler: {filters}")
-                                if 'response_text' in result:
-                                    st.text(f"API Yanıtı: {result['response_text'][:500]}...")
-
-                    except Exception as e:
-                        st.error(f"❌ Beklenmeyen hata: {str(e)}")
-
-        # Excel Export
-        if not st.session_state.bonus_data.empty:
-            if st.button("📊 Excel'e Kaydet", use_container_width=True):
-                try:
-                    # Excel dosyası oluştur
-                    excel_buffer = st.session_state.api_handler.create_excel_export(
-                        st.session_state.bonus_data)
-
-                    if excel_buffer:
-                        filename = f"bonus_raporu_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx"
-
-                        st.download_button(
-                            label="📥 Excel Dosyasını İndir",
-                            data=excel_buffer,
-                            file_name=filename,
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True)
-                except Exception as e:
-                    st.error(f"Excel export hatası: {str(e)}")
-
-            # Özet Rapor
-            if st.button("📈 Özet Rapor Oluştur", use_container_width=True):
-                try:
-                    # Kullanıcı bazlı özet rapor (hangi kullanıcı kaç defa aldı)
-                    user_summary = create_summary_report(st.session_state.bonus_data)
-                    
-                    if not user_summary.empty:
-                        st.subheader("👥 Kullanıcı Bazlı Özet (Hangi kullanıcı kaç defa aldı)")
-                        st.dataframe(user_summary, use_container_width=True)
-                        
-                        # Kullanıcı özet raporu Excel export
-                        excel_buffer = st.session_state.api_handler.create_excel_export(user_summary)
-                        if excel_buffer:
-                            st.download_button(
-                                label="📥 Kullanıcı Özet Raporunu İndir",
-                                data=excel_buffer,
-                                file_name=f"kullanici_ozet_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True
-                            )
-                        
-                        st.divider()
-                        
-                    # Bonus türü bazlı özet rapor
-                    type_summary = create_bonus_type_summary(st.session_state.bonus_data)
-                    
-                    if not type_summary.empty:
-                        st.subheader("🎁 Bonus Türlerine Göre Özet")
-                        st.dataframe(type_summary, use_container_width=True)
-                        
-                        # Genel istatistikler
-                        total_bonuses = len(st.session_state.bonus_data)
-                        total_amount = st.session_state.bonus_data['Miktar'].sum()
-                        unique_users = st.session_state.bonus_data['Kullanıcı ID'].nunique()
-                        
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Toplam Bonus Sayısı", total_bonuses)
-                        with col2:
-                            st.metric("Toplam Miktar", format_currency(total_amount))
-                        with col3:
-                            st.metric("Benzersiz Kullanıcı", unique_users)
-
-                except Exception as e:
-                    st.error(f"Özet rapor hatası: {str(e)}")
-
-        # Temizle
-        if st.button("🗑️ Sonuçları Temizle", use_container_width=True):
-            st.session_state.bonus_data = pd.DataFrame()
-            st.success("Sonuçlar temizlendi!")
-            st.rerun()
-
-    # Sonuçlar tablosu
-    if not st.session_state.bonus_data.empty:
-        st.subheader("📋 Bonus Raporu")
-
-        # Veri tablosu
-        st.dataframe(st.session_state.bonus_data,
-                     use_container_width=True,
-                     height=400)
-
-        # Durum bilgileri
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            st.info(f"📊 Toplam kayıt: {len(st.session_state.bonus_data)}")
-
-        with col2:
-            if 'Miktar' in st.session_state.bonus_data.columns:
-                total_amount = st.session_state.bonus_data['Miktar'].sum()
-                st.info(f"💰 Toplam miktar: {format_currency(total_amount)}")
-
-        with col3:
-            if 'Kullanıcı ID' in st.session_state.bonus_data.columns:
-                unique_users = st.session_state.bonus_data['Kullanıcı ID'].nunique()
-                st.info(f"👤 Benzersiz kullanıcı: {unique_users}")
+if __name__ == "__main__":
+    app = BonusReportApp()
 
 
 if __name__ == "__main__":
