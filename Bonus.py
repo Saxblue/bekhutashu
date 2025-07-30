@@ -6,10 +6,14 @@ Streamlit web uygulaması - API entegrasyonu, tarih filtreleme ve Excel export �
 import streamlit as st
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import json
 import os
 from datetime import datetime, timedelta
 from io import BytesIO
+import time
+import random
 
 # Sayfa konfigürasyonu
 st.set_page_config(
@@ -150,15 +154,27 @@ class BonusAPIHandler:
         self.origin = settings.get("origin", self.origin)
     
     def get_headers(self):
-        """API istekleri için header oluştur"""
+        """API istekleri için header oluştur - VPN/CloudFlare bypass için optimized"""
         return {
-            "accept": "application/json, text/plain, */*",
-            "accept-language": "tr-TR,tr;q=0.9,en;q=0.8",
-            "authorization": f"Bearer {self.auth_key}",
-            "content-type": "application/json",
-            "origin": self.origin,
-            "referer": self.referer,
-            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Authorization": f"Bearer {self.auth_key}",
+            "Content-Type": "application/json",
+            "Origin": self.origin,
+            "Referer": self.referer,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors", 
+            "Sec-Fetch-Site": "same-origin",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "Upgrade-Insecure-Requests": "1",
+            "Dnt": "1",
+            "X-Requested-With": "XMLHttpRequest"
         }
     
     def build_request_payload(self, filters):
@@ -197,7 +213,7 @@ class BonusAPIHandler:
         return status_map.get(acceptance_type, "Bilinmeyen")
     
     def fetch_bonus_report(self, filters):
-        """BetConstruct API'den bonus raporu getir"""
+        """BetConstruct API'den bonus raporu getir - CloudFlare bypass ile"""
         try:
             payload = self.build_request_payload(filters)
             
@@ -208,12 +224,81 @@ class BonusAPIHandler:
                     "data": pd.DataFrame()
                 }
             
-            response = requests.post(
-                self.base_url,
-                headers=self.get_headers(),
-                json=payload,
-                timeout=30
-            )
+            # VPN bypass için multiple attempt strategy
+            for attempt in range(3):
+                try:
+                    # Her denemede farklı session
+                    session = requests.Session()
+                    
+                    # Retry stratejisi
+                    retry_strategy = Retry(
+                        total=2,
+                        backoff_factor=0.5,
+                        status_forcelist=[429, 500, 502, 503, 504],
+                        allowed_methods=["POST"]
+                    )
+                    
+                    adapter = HTTPAdapter(max_retries=retry_strategy)
+                    session.mount("http://", adapter)
+                    session.mount("https://", adapter)
+                    
+                    # Headers ayarla
+                    headers = self.get_headers()
+                    
+                    # Her denemede User-Agent varyasyonu
+                    user_agents = [
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                    ]
+                    headers["User-Agent"] = user_agents[attempt % len(user_agents)]
+                    
+                    session.headers.update(headers)
+                    
+                    # Random delay VPN detection bypass için
+                    if attempt > 0:
+                        time.sleep(random.uniform(1, 3))
+                    
+                    # İsteği gönder
+                    response = session.post(
+                        self.base_url,
+                        json=payload,
+                        timeout=(15, 60),
+                        verify=True,
+                        allow_redirects=False
+                    )
+                    
+                    # 530 değilse başarılı, döngüden çık
+                    if response.status_code != 530:
+                        break
+                        
+                except requests.exceptions.RequestException as e:
+                    if attempt == 2:  # Son deneme
+                        raise e
+                    continue
+            
+            # Detaylı hata kontrolü
+            if response.status_code == 530:
+                return {
+                    "success": False,
+                    "error": "CloudFlare engeli - Lütfen Auth Key'inizi kontrol edin veya VPN kullanmayı deneyin",
+                    "data": pd.DataFrame(),
+                    "response_text": f"Status: {response.status_code}, Headers: {dict(response.headers)}"
+                }
+            elif response.status_code == 401:
+                return {
+                    "success": False,
+                    "error": "Yetkisiz erişim - Auth Key hatalı veya süresi dolmuş",
+                    "data": pd.DataFrame(),
+                    "response_text": response.text
+                }
+            elif response.status_code == 403:
+                return {
+                    "success": False,
+                    "error": "Erişim yasak - IP adresi veya Auth Key kısıtlaması",
+                    "data": pd.DataFrame(),
+                    "response_text": response.text
+                }
             
             response.raise_for_status()
             
@@ -229,18 +314,26 @@ class BonusAPIHandler:
             }
             
         except requests.exceptions.RequestException as e:
+            error_msg = f"API isteği hatası: {str(e)}"
+            if "530" in str(e):
+                error_msg += " - CloudFlare koruması aktif olabilir"
+            elif "timeout" in str(e).lower():
+                error_msg += " - Bağlantı zaman aşımı"
+            elif "connection" in str(e).lower():
+                error_msg += " - Bağlantı problemi"
+            
             return {
                 "success": False,
-                "error": f"API isteği hatası: {str(e)}",
+                "error": error_msg,
                 "data": pd.DataFrame(),
-                "response_text": response.text if response else 'Bağlantı hatası'
+                "response_text": response.text if 'response' in locals() and response else 'Bağlantı kurulamadı'
             }
         except Exception as e:
             return {
                 "success": False,
                 "error": f"Genel hata: {str(e)}",
                 "data": pd.DataFrame(),
-                "response_text": response.text if response else 'Genel hata'
+                "response_text": response.text if 'response' in locals() and response else 'Genel hata'
             }
     
     def process_api_response(self, api_data, bonus_type_filter=None):
@@ -434,6 +527,31 @@ def main():
                 if st.button("🔍 Test Et"):
                     if auth_key:
                         st.info("API bağlantısı test ediliyor...")
+                        
+                        # Test API handler oluştur
+                        test_handler = BonusAPIHandler(auth_key)
+                        test_handler.referer = referer or "https://backoffice.betconstruct.com/"
+                        test_handler.origin = origin or "https://backoffice.betconstruct.com"
+                        
+                        # Basit test isteği
+                        test_filters = {
+                            "start_date": datetime.now().date() - timedelta(days=1),
+                            "end_date": datetime.now().date(),
+                            "max_rows": 1
+                        }
+                        
+                        test_result = test_handler.fetch_bonus_report(test_filters)
+                        
+                        if test_result["success"]:
+                            st.success("✅ API bağlantısı başarılı!")
+                        else:
+                            st.error(f"❌ API testi başarısız: {test_result['error']}")
+                            
+                            with st.expander("Test Hata Detayları"):
+                                st.text(f"Auth Key: {auth_key[:20]}..." if len(auth_key) > 20 else auth_key)
+                                st.text(f"API URL: {test_handler.base_url}")
+                                if 'response_text' in test_result:
+                                    st.text(f"Yanıt: {test_result['response_text'][:200]}...")
                     else:
                         st.warning("⚠️ Auth Key giriniz!")
             
@@ -441,6 +559,30 @@ def main():
                 if st.button("❌ Kapat"):
                     st.session_state.show_api_settings = False
                     st.rerun()
+            
+            # Troubleshooting rehberi
+            with st.expander("🔧 VPN ile 530 Error Çözümü"):
+                st.markdown("""
+                **VPN kullanırken 530 hatası alıyorsanız:**
+                1. **En Etkili:** VPN'i geçici olarak kapatın ve tekrar deneyin
+                2. VPN sunucu lokasyonunu değiştirin (Türkiye/Avrupa tercih edin)
+                3. VPN protokolünü değiştirin (OpenVPN → WireGuard veya tersi)
+                4. "Test Et" butonuna birkaç kez tıklayın (otomatik retry var)
+                
+                **Auth Key güncellemesi:**
+                1. BetConstruct back office'e tarayıcıdan giriş yapın
+                2. F12 → Network sekmesi → herhangi bir işlem yapın
+                3. İsteklerde Authorization: Bearer ... kısmını kopyalayın
+                4. Buraya yapıştırın
+                
+                **Diğer çözümler:**
+                - İnternet bağlantınızı yenileyin
+                - Farklı bir cihazdan deneyin
+                - Auth Key'in başında/sonunda boşluk olmadığından emin olun
+                - Token'ın tam olarak kopyalandığından emin olun
+                
+                **Teknik detay:** Bu uygulama 3 farklı User-Agent ile otomatik deneme yapıyor ve CloudFlare bypass teknikleri kullanıyor.
+                """)
             
             st.divider()
 
