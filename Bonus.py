@@ -97,11 +97,11 @@ def create_summary_report(df):
 
 
 def export_summary_to_excel(df, filename=None):
-    """Özet raporları Excel'e aktarma fonksiyonu - Çoklu sayfa desteği ile"""
+    """Özet raporları Excel'e aktarma fonksiyonu - Streamlit Cloud uyumlu"""
     try:
         if df.empty:
             st.error("Veri bulunamadı. Excel export yapılamaz.")
-            return None
+            return None, None
         
         # Dosya adı oluştur
         if not filename:
@@ -111,53 +111,83 @@ def export_summary_to_excel(df, filename=None):
         # Bellek buffer oluştur
         buffer = BytesIO()
         
-        # Excel writer oluştur
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            # Ana veri sayfası
-            df.to_excel(writer, sheet_name='Ana Veri', index=False)
-            
-            # Kullanıcı bazlı özet rapor
-            summary_report = create_summary_report(df)
-            if not summary_report.empty:
-                summary_report.to_excel(writer, sheet_name='Kullanıcı Özeti', index=False)
-            
-            # Bonus türü bazlı özet rapor
-            bonus_type_summary = create_bonus_type_summary(df)
-            if not bonus_type_summary.empty:
-                bonus_type_summary.to_excel(writer, sheet_name='Bonus Türü Özeti', index=False)
-            
-            # Günlük özet rapor
-            daily_summary = create_daily_summary(df)
-            if not daily_summary.empty:
-                daily_summary.to_excel(writer, sheet_name='Günlük Özet', index=False)
-            
-            # Her sayfa için stil uygula
-            for sheet_name in writer.sheets:
-                worksheet = writer.sheets[sheet_name]
+        # Streamlit Cloud için xlsxwriter kullan
+        try:
+            with pd.ExcelWriter(buffer, engine='xlsxwriter', options={'remove_timezone': True}) as writer:
+                # Ana veri sayfası
+                df.to_excel(writer, sheet_name='Ana Veri', index=False)
                 
-                # Sütun genişlikleri ayarla
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    for cell in column:
+                # Kullanıcı bazlı özet rapor
+                summary_report = create_summary_report(df)
+                if not summary_report.empty:
+                    summary_report.to_excel(writer, sheet_name='Kullanici Ozeti', index=False)
+                
+                # Bonus türü bazlı özet rapor
+                bonus_type_summary = create_bonus_type_summary(df)
+                if not bonus_type_summary.empty:
+                    bonus_type_summary.to_excel(writer, sheet_name='Bonus Turu Ozeti', index=False)
+                
+                # Günlük özet rapor
+                daily_summary = create_daily_summary(df)
+                if not daily_summary.empty:
+                    daily_summary.to_excel(writer, sheet_name='Gunluk Ozet', index=False)
+                
+                # Workbook ve formatlar
+                workbook = writer.book
+                header_format = workbook.add_format({
+                    'bold': True,
+                    'text_wrap': True,
+                    'valign': 'top',
+                    'fg_color': '#D7E4BC',
+                    'border': 1
+                })
+                
+                # Her sayfa için stil uygula
+                for sheet_name in writer.sheets:
+                    worksheet = writer.sheets[sheet_name]
+                    
+                    # Header formatı uygula ve sütun genişliklerini ayarla
+                    if sheet_name == 'Ana Veri':
+                        data_for_width = df
+                    elif sheet_name == 'Kullanici Ozeti':
+                        data_for_width = summary_report
+                    elif sheet_name == 'Bonus Turu Ozeti':
+                        data_for_width = bonus_type_summary
+                    elif sheet_name == 'Gunluk Ozet':
+                        data_for_width = daily_summary
+                    else:
+                        continue
+                    
+                    # Sütun genişlikleri ayarla
+                    for col_num, value in enumerate(data_for_width.columns.values):
+                        worksheet.write(0, col_num, value, header_format)
                         try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
+                            max_len = max(
+                                data_for_width[value].astype(str).map(len).max(),
+                                len(str(value))
+                            )
+                            worksheet.set_column(col_num, col_num, min(max_len + 2, 50))
                         except:
-                            pass
-                    adjusted_width = min(max_length + 2, 50)
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
-                
-                # Başlık satırını kalın yap
-                if worksheet.max_row > 0:
-                    for cell in worksheet[1]:
-                        cell.font = cell.font.copy(bold=True)
-        
-        buffer.seek(0)
-        return buffer.getvalue(), filename
+                            worksheet.set_column(col_num, col_num, 15)
+            
+            buffer.seek(0)
+            return buffer.getvalue(), filename
+            
+        except Exception as xlsxwriter_error:
+            st.error(f"xlsxwriter hatası: {str(xlsxwriter_error)}")
+            # Fallback: basit Excel export
+            try:
+                buffer = BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df.to_excel(writer, sheet_name='Ana Veri', index=False)
+                buffer.seek(0)
+                return buffer.getvalue(), filename
+            except Exception as openpyxl_error:
+                st.error(f"openpyxl fallback hatası: {str(openpyxl_error)}")
+                return None, None
         
     except Exception as e:
-        st.error(f"Excel export hatası: {str(e)}")
+        st.error(f"Excel export genel hatası: {str(e)}")
         return None, None
 
 
@@ -552,39 +582,62 @@ class BonusAPIHandler:
             return pd.DataFrame()
     
     def create_excel_export(self, df):
-        """DataFrame'i Excel formatında export et"""
+        """DataFrame'i Excel formatında export et - Streamlit Cloud uyumlu"""
         try:
             if df.empty:
+                print("DataFrame boş")
                 return None
             
             # Bellek buffer oluştur
             buffer = BytesIO()
             
-            # Excel writer oluştur
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df.to_excel(writer, sheet_name='Bonus Raporu', index=False)
+            # Streamlit Cloud için xlsxwriter kullan
+            try:
+                with pd.ExcelWriter(buffer, engine='xlsxwriter', options={'remove_timezone': True}) as writer:
+                    df.to_excel(writer, sheet_name='Bonus Raporu', index=False)
+                    
+                    # Worksheet'e stil ekle
+                    workbook = writer.book
+                    worksheet = writer.sheets['Bonus Raporu']
+                    
+                    # Header formatı
+                    header_format = workbook.add_format({
+                        'bold': True,
+                        'text_wrap': True,
+                        'valign': 'top',
+                        'fg_color': '#D7E4BC',
+                        'border': 1
+                    })
+                    
+                    # Sütun genişlikleri ayarla
+                    for col_num, value in enumerate(df.columns.values):
+                        worksheet.write(0, col_num, value, header_format)
+                        # Sütun genişliği hesapla
+                        max_len = max(
+                            df[value].astype(str).map(len).max(),  # Veri uzunluğu
+                            len(str(value))  # Header uzunluğu
+                        )
+                        worksheet.set_column(col_num, col_num, min(max_len + 2, 50))
                 
-                # Worksheet'e stil ekle
-                worksheet = writer.sheets['Bonus Raporu']
+                buffer.seek(0)
+                return buffer.getvalue()
                 
-                # Sütun genişlikleri ayarla
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    for cell in column:
-                        try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
-                    adjusted_width = min(max_length + 2, 50)
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
-            
-            buffer.seek(0)
-            return buffer.getvalue()
+            except Exception as xlsxwriter_error:
+                print(f"xlsxwriter hatası: {str(xlsxwriter_error)}")
+                # Fallback: basit Excel export
+                try:
+                    buffer = BytesIO()
+                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                        df.to_excel(writer, sheet_name='Bonus Raporu', index=False)
+                    buffer.seek(0)
+                    return buffer.getvalue()
+                except Exception as openpyxl_error:
+                    print(f"openpyxl hatası: {str(openpyxl_error)}")
+                    return None
             
         except Exception as e:
-            print(f"Excel export hatası: {str(e)}")
+            print(f"Excel export genel hatası: {str(e)}")
+            return None
             return None
 
 
