@@ -338,8 +338,8 @@ class BonusAPIHandler:
             
             data = response.json()
             
-            # API yanıtını DataFrame'e çevir - bonus türü filtresini geç
-            df = self.process_api_response(data, filters.get("bonus_type"))
+            # API yanıtını DataFrame'e çevir - bonus türleri filtresini geç
+            df = self.process_api_response(data, filters.get("bonus_types"))
             
             # Eğer sonuç yoksa ve bugünün tarihiyse, 23:59:59'a kadar olan verileri deneyelim
             if df.empty and filters.get("end_date") == datetime.now().date():
@@ -360,7 +360,7 @@ class BonusAPIHandler:
                 
                 if response.status_code == 200:
                     data = response.json()
-                    df = self.process_api_response(data, filters.get("bonus_type"))
+                    df = self.process_api_response(data, filters.get("bonus_types"))
                     
             return {
                 "success": True,
@@ -391,8 +391,8 @@ class BonusAPIHandler:
                 "response_text": response.text if 'response' in locals() and response else 'Genel hata'
             }
     
-    def process_api_response(self, api_data, bonus_type_filter=None):
-        """API yanıtını DataFrame formatına çevir - Tkinter versiyonuna uygun"""
+    def process_api_response(self, api_data, bonus_types_filter=None):
+        """API yanıtını DataFrame formatına çevir - Çoklu bonus türü desteği ile"""
         try:
             # API hata kontrolü
             if isinstance(api_data, dict) and api_data.get('HasError', False):
@@ -420,9 +420,17 @@ class BonusAPIHandler:
                 if isinstance(bonus, dict):
                     bonus_name = str(bonus.get("Name", ""))
                     
-                    # Bonus türü filtrelemesi (orijinal kodda olduğu gibi)
-                    if bonus_type_filter and bonus_type_filter != "Tüm Bonuslar":
-                        if bonus_name.strip().upper() != bonus_type_filter.upper():
+                    # Çoklu bonus türü filtrelemesi
+                    if bonus_types_filter and len(bonus_types_filter) > 0:
+                        # Seçilen bonus türlerinden herhangi biri ile eşleşiyor mu kontrol et
+                        bonus_match = False
+                        for selected_type in bonus_types_filter:
+                            if bonus_name.strip().upper() == selected_type.upper():
+                                bonus_match = True
+                                break
+                        
+                        # Eşleşme yoksa bu bonusu atla
+                        if not bonus_match:
                             continue
                     
                     # API yanıtından doğru alan isimlerini kullan
@@ -671,7 +679,7 @@ def main():
 
         with col_bonus:
             bonus_types = [
-                "Tüm Bonuslar", "CASİNO KAYIP BONUSU", "%100  SLOT BONUSU",
+                "CASİNO KAYIP BONUSU", "%100  SLOT BONUSU",
                 "%100 CASİNO HOŞGELDİN BONUSU",
                 "%100 PRAGMATİC SALI - PERŞEMBE", "%100 SPOR HOŞGELDİN BONUSU",
                 "%25 SPOR YATIRIM BONUSU", "%5 CASİNO HAFTALIK",
@@ -686,7 +694,11 @@ def main():
                 "SPOR KAYIP BONUSU", "YENİ CASİNO ŞANS BONUSU"
             ]
 
-            bonus_type = st.selectbox("Bonus Türü:", bonus_types)
+            selected_bonus_types = st.multiselect(
+                "Bonus Türleri (Birden fazla seçebilirsiniz):",
+                bonus_types,
+                help="Boş bırakırsanız tüm bonus türleri getirilir"
+            )
 
         max_rows = st.number_input("Maksimum Kayıt:",
                                    min_value=1,
@@ -709,7 +721,7 @@ def main():
                             "start_date": start_date,
                             "end_date": end_date,
                             "client_id": client_id.strip() if client_id else None,
-                            "bonus_type": bonus_type if bonus_type != "Tüm Bonuslar" else None,
+                            "bonus_types": selected_bonus_types if selected_bonus_types else None,
                             "max_rows": max_rows
                         }
 
