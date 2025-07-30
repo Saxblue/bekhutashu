@@ -57,7 +57,6 @@ def format_date_for_api(date_obj):
         
         # BetConstruct formatına çevir: dd-mm-yy - HH:MM:SS
         return dt.strftime("%d-%m-%y - %H:%M:%S")
-    
     except:
         return '-'
 
@@ -142,8 +141,8 @@ def create_bonus_type_summary(df):
 
 class BonusAPIHandler:
     def __init__(self, auth_key=None):
-        self.base_url = "https://backofficewebladmin.betconstruct.com/odata/IqSoftBllServiceEntities/bll/ClientBonusReport"
-        self.auth_key = auth_key or os.getenv("BETCONSTRUCT_AUTH_KEY", "2582007cbe97f891cf5fe69f4f2d44b002c021e6fca4c8276dc0accf4098d5fe")
+        self.base_url = "https://backofficewebadmin.betconstruct.com/api/tr/Report/GetClientBonusReport"
+        self.auth_key = auth_key or os.getenv("BETCONSTRUCT_AUTH_KEY", "affe433a578d139ed6aa4e3c02bbdd7e341719493c31e3c39a8ee60711aaeb75")
         self.referer = "https://backoffice.betconstruct.com/"
         self.origin = "https://backoffice.betconstruct.com"
     
@@ -154,53 +153,65 @@ class BonusAPIHandler:
         self.origin = settings.get("origin", self.origin)
     
     def get_headers(self):
-        """API istekleri için header oluştur - VPN/CloudFlare bypass için optimized"""
+        """API istekleri için header oluştur - Daha basit ve etkili versiyon"""
         return {
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Accept-Encoding": "gzip, deflate, br, zstd",
-            "Authorization": f"Bearer {self.auth_key}",
+            "Authentication": self.auth_key,
+            "Accept": "application/json",
             "Content-Type": "application/json",
-            "Origin": self.origin,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
             "Referer": self.referer,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-            "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"Windows"',
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors", 
-            "Sec-Fetch-Site": "same-origin",
-            "Cache-Control": "no-cache",
-            "Pragma": "no-cache",
-            "Upgrade-Insecure-Requests": "1",
-            "Dnt": "1",
+            "Origin": self.origin,
             "X-Requested-With": "XMLHttpRequest"
         }
     
     def build_request_payload(self, filters):
-        """API isteği için payload oluştur - Orijinal Tkinter koduna uygun"""
+        """API isteği için payload oluştur - Tkinter versiyonuna uygun"""
         try:
-            # Tarih formatı: BetConstruct API için "dd-mm-yy - HH:MM:SS" formatı
-            start_date_str = format_date_for_api(filters["start_date"])
-            end_date_str = format_date_for_api(filters["end_date"])
+            # Tarihleri string'e çevir
+            start_date = format_date_for_api(filters["start_date"])
+            end_date = format_date_for_api(filters["end_date"])
             
-            # Temel payload yapısı - orijinal koddan
+            # Debug log
+            print(f"Start date: {start_date}")
+            print(f"End date: {end_date}")
+            
+            # Tkinter versiyonuna uygun payload yapısı
             payload = {
-                "PartnerBonusStartDateLocal": start_date_str,
-                "PartnerBonusEndDateLocal": end_date_str,
-                "State": 0,
-                "RowCount": filters.get("max_rows", 2000)
+                "ClientBonusId": "",
+                "ClientId": str(filters.get("client_id", "")),
+                "PartnerBonusId": "",
+                "AcceptanceType": None,
+                "BonusType": "1" if filters.get("bonus_type") == "Casino Kayıp Bonusu" else None,
+                "BonusSource": None,
+                "ByPassTotals": False,
+                "EndDateLocal": None,
+                "IsTest": None,
+                "MaxRows": filters.get("max_rows", 100),
+                "PartnerBonusEndDateLocal": end_date,
+                "PartnerBonusStartDateLocal": start_date,
+                "ResultFromDateLocal": None,
+                "ResultToDateLocal": None,
+                "ResultType": None,
+                "SkeepRows": 0,
+                "SportsbookProfileId": None,
+                "StartDateLocal": None,
+                "ToCurrencyId": "TRY"
             }
             
-            # ClientBonusId ekleme (orijinal kodda var)
-            if filters.get("client_id"):
-                payload["ClientBonusId"] = int(filters["client_id"])
+            # Debug log
+            print(f"Payload: {json.dumps(payload, indent=2)}")
             
             return payload
             
         except Exception as e:
             print(f"Payload oluşturma hatası: {str(e)}")
-            return {}
+            return {
+                "error": f"Payload oluşturma hatası: {str(e)}",
+                "details": {
+                    "start_date": str(filters.get("start_date")),
+                    "end_date": str(filters.get("end_date"))
+                }
+            }
     
     def get_bonus_status(self, acceptance_type):
         """Bonus durumunu çevir"""
@@ -224,16 +235,16 @@ class BonusAPIHandler:
                     "data": pd.DataFrame()
                 }
             
-            # VPN bypass için multiple attempt strategy
-            for attempt in range(3):
+            # Her denemede farklı IP adresi ve User-Agent varyasyonu
+            for attempt in range(5):  # Deneme sayısını artırma
                 try:
                     # Her denemede farklı session
                     session = requests.Session()
                     
                     # Retry stratejisi
                     retry_strategy = Retry(
-                        total=2,
-                        backoff_factor=0.5,
+                        total=3,
+                        backoff_factor=1.0,  # Daha uzun bekleme
                         status_forcelist=[429, 500, 502, 503, 504],
                         allowed_methods=["POST"]
                     )
@@ -245,35 +256,58 @@ class BonusAPIHandler:
                     # Headers ayarla
                     headers = self.get_headers()
                     
-                    # Her denemede User-Agent varyasyonu
+                    # Daha fazla User-Agent varyasyonu
                     user_agents = [
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                        f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(120, 135)}.0.0.0 Safari/537.36",
+                        f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Firefox/{random.randint(120, 135)}.0 Safari/537.36",
+                        f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(120, 135)}.0.0.0 Safari/537.36",
+                        f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(120, 135)}.0.0.0 Safari/537.36",
+                        f"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:{random.randint(120, 135)}.0) Gecko/20100101 Firefox/{random.randint(120, 135)}.0"
                     ]
-                    headers["User-Agent"] = user_agents[attempt % len(user_agents)]
+                    headers["User-Agent"] = random.choice(user_agents)
+                    
+                    # Daha fazla HTTP başlığı varyasyonu
+                    headers["Accept-Language"] = random.choice([
+                        "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+                        "en-US,en;q=0.9",
+                        "tr-TR,tr;q=0.8,en-US;q=0.7,en;q=0.6"
+                    ])
+                    
+                    # Daha fazla HTTP başlığı varyasyonu
+                    headers["Sec-Ch-Ua"] = random.choice([
+                        '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+                        '"Firefox";v="131", "Gecko";v="131", "Not_A Brand";v="24"',
+                        '"Safari";v="131", "WebKit";v="131", "Not_A Brand";v="24"'
+                    ])
                     
                     session.headers.update(headers)
                     
-                    # Random delay VPN detection bypass için
+                    # Daha uzun ve rastgele bekleme süresi
                     if attempt > 0:
-                        time.sleep(random.uniform(1, 3))
+                        wait_time = random.uniform(2, 5)
+                        print(f"Waiting {wait_time:.1f} seconds before retry {attempt + 1}...")
+                        time.sleep(wait_time)
                     
                     # İsteği gönder
                     response = session.post(
                         self.base_url,
                         json=payload,
-                        timeout=(15, 60),
+                        timeout=(30, 120),  # Timeout'u artırma
                         verify=True,
                         allow_redirects=False
                     )
+                    
+                    # Response detaylarını logla
+                    print(f"Attempt {attempt + 1}: Status Code: {response.status_code}")
+                    print(f"Response Headers: {dict(response.headers)}")
                     
                     # 530 değilse başarılı, döngüden çık
                     if response.status_code != 530:
                         break
                         
                 except requests.exceptions.RequestException as e:
-                    if attempt == 2:  # Son deneme
+                    print(f"Request failed on attempt {attempt + 1}: {str(e)}")
+                    if attempt == 4:  # Son deneme
                         raise e
                     continue
             
@@ -307,6 +341,27 @@ class BonusAPIHandler:
             # API yanıtını DataFrame'e çevir - bonus türü filtresini geç
             df = self.process_api_response(data, filters.get("bonus_type"))
             
+            # Eğer sonuç yoksa ve bugünün tarihiyse, 23:59:59'a kadar olan verileri deneyelim
+            if df.empty and filters.get("end_date") == datetime.now().date():
+                # End date'i 23:59:59'a ayarla
+                payload["PartnerBonusEndDateLocal"] = datetime.combine(
+                    filters["end_date"], 
+                    datetime.max.time()
+                ).strftime("%d-%m-%y - %H:%M:%S")
+                
+                # Tekrar deneyelim
+                response = session.post(
+                    self.base_url,
+                    json=payload,
+                    timeout=(30, 120),
+                    verify=True,
+                    allow_redirects=False
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    df = self.process_api_response(data, filters.get("bonus_type"))
+                    
             return {
                 "success": True,
                 "data": df,
@@ -337,7 +392,7 @@ class BonusAPIHandler:
             }
     
     def process_api_response(self, api_data, bonus_type_filter=None):
-        """API yanıtını DataFrame formatına çevir - Orijinal Tkinter koduna uygun"""
+        """API yanıtını DataFrame formatına çevir - Tkinter versiyonuna uygun"""
         try:
             # API hata kontrolü
             if isinstance(api_data, dict) and api_data.get('HasError', False):
@@ -355,6 +410,7 @@ class BonusAPIHandler:
                         bonus_list = bonus_report_data["Objects"]
             
             if not bonus_list or len(bonus_list) == 0:
+                print(f"API Yanıtı: {str(api_data)[:200]}")
                 return pd.DataFrame()
             
             # DataFrame için veri listesi
