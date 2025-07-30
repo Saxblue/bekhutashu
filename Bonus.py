@@ -96,6 +96,106 @@ def create_summary_report(df):
         return pd.DataFrame()
 
 
+def export_summary_to_excel(df, filename=None):
+    """Özet raporları Excel'e aktarma fonksiyonu - Çoklu sayfa desteği ile"""
+    try:
+        if df.empty:
+            st.error("Veri bulunamadı. Excel export yapılamaz.")
+            return None
+        
+        # Dosya adı oluştur
+        if not filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"bonus_ozet_raporu_{timestamp}.xlsx"
+        
+        # Bellek buffer oluştur
+        buffer = BytesIO()
+        
+        # Excel writer oluştur
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            # Ana veri sayfası
+            df.to_excel(writer, sheet_name='Ana Veri', index=False)
+            
+            # Kullanıcı bazlı özet rapor
+            summary_report = create_summary_report(df)
+            if not summary_report.empty:
+                summary_report.to_excel(writer, sheet_name='Kullanıcı Özeti', index=False)
+            
+            # Bonus türü bazlı özet rapor
+            bonus_type_summary = create_bonus_type_summary(df)
+            if not bonus_type_summary.empty:
+                bonus_type_summary.to_excel(writer, sheet_name='Bonus Türü Özeti', index=False)
+            
+            # Günlük özet rapor
+            daily_summary = create_daily_summary(df)
+            if not daily_summary.empty:
+                daily_summary.to_excel(writer, sheet_name='Günlük Özet', index=False)
+            
+            # Her sayfa için stil uygula
+            for sheet_name in writer.sheets:
+                worksheet = writer.sheets[sheet_name]
+                
+                # Sütun genişlikleri ayarla
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+                
+                # Başlık satırını kalın yap
+                if worksheet.max_row > 0:
+                    for cell in worksheet[1]:
+                        cell.font = cell.font.copy(bold=True)
+        
+        buffer.seek(0)
+        return buffer.getvalue(), filename
+        
+    except Exception as e:
+        st.error(f"Excel export hatası: {str(e)}")
+        return None, None
+
+
+def create_daily_summary(df):
+    """Günlük bonus özet raporu oluştur"""
+    try:
+        if df.empty or 'Tarih' not in df.columns or 'Miktar' not in df.columns:
+            return pd.DataFrame()
+        
+        # Tarih sütununu datetime'a çevir
+        df_copy = df.copy()
+        df_copy['Tarih'] = pd.to_datetime(df_copy['Tarih'], errors='coerce')
+        df_copy['Gün'] = df_copy['Tarih'].dt.date
+        
+        # Günlük gruplama
+        daily_summary = df_copy.groupby('Gün').agg({
+            'Miktar': ['count', 'sum'],
+            'Kullanıcı ID': 'nunique'
+        }).reset_index()
+        
+        # Sütun adlarını düzelt
+        daily_summary.columns = ['Tarih', 'Toplam İşlem', 'Toplam Miktar', 'Benzersiz Kullanıcı']
+        
+        # Miktarları formatla
+        daily_summary['Toplam Miktar Formatted'] = daily_summary['Toplam Miktar'].apply(lambda x: format_currency(x))
+        
+        # Görüntüleme sütunları
+        display_columns = ['Tarih', 'Toplam İşlem', 'Toplam Miktar Formatted', 'Benzersiz Kullanıcı']
+        daily_summary_display = daily_summary[display_columns].copy()
+        daily_summary_display.columns = ['Tarih', 'Toplam İşlem', 'Toplam Miktar', 'Benzersiz Kullanıcı']
+        
+        return daily_summary_display.sort_values('Tarih', ascending=False)
+        
+    except Exception as e:
+        print(f"Günlük özet rapor hatası: {str(e)}")
+        return pd.DataFrame()
+
+
 def create_bonus_type_summary(df):
     """Bonus türü bazlı özet rapor oluştur"""
     try:
@@ -763,7 +863,7 @@ def main():
                 except Exception as e:
                     st.error(f"Excel export hatası: {str(e)}")
 
-            # Özet Rapor
+            # Özet Rapor - Bonus - Kopya.py'deki çalışan versiyona uygun
             if st.button("📈 Özet Rapor Oluştur", use_container_width=True):
                 try:
                     # Kullanıcı bazlı özet rapor (hangi kullanıcı kaç defa aldı)
@@ -773,7 +873,7 @@ def main():
                         st.subheader("👥 Kullanıcı Bazlı Özet (Hangi kullanıcı kaç defa aldı)")
                         st.dataframe(user_summary, use_container_width=True)
                         
-                        # Kullanıcı özet raporu Excel export
+                        # Kullanıcı özet raporu Excel export - Streamlit Cloud uyumlu
                         excel_buffer = st.session_state.api_handler.create_excel_export(user_summary)
                         if excel_buffer:
                             st.download_button(
