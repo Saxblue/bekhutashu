@@ -1,0 +1,7 @@
+{
+    "api_url": "https://backofficewebadmin.betconstruct.com/api/tr/Client/GetClientById?id={}",
+    "auth_key": "df85bc6b56f6209481b37bf9a22fa0a3b25a4f9c604b26f0a2804eee52d2cbf9",
+    "referer": "https://backoffice.betconstruct.com/",
+    "origin": "https://backoffice.betconstruct.com",
+    "authenticated": true
+}
