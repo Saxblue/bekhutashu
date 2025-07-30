@@ -873,16 +873,28 @@ def main():
                         st.subheader("👥 Kullanıcı Bazlı Özet (Hangi kullanıcı kaç defa aldı)")
                         st.dataframe(user_summary, use_container_width=True)
                         
-                        # Kullanıcı özet raporu Excel export - Streamlit Cloud uyumlu
-                        excel_buffer = st.session_state.api_handler.create_excel_export(user_summary)
-                        if excel_buffer:
-                            st.download_button(
-                                label="📥 Kullanıcı Özet Raporunu İndir",
-                                data=excel_buffer,
-                                file_name=f"kullanici_ozet_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True
-                            )
+                        # Kullanıcı özet raporu Excel export - Streamlit Cloud için geliştirilmiş
+                        try:
+                            excel_buffer = st.session_state.api_handler.create_excel_export(user_summary)
+                            if excel_buffer:
+                                # Session state'e kaydet
+                                st.session_state.user_summary_excel = excel_buffer
+                                st.session_state.user_summary_filename = f"kullanici_ozet_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx"
+                                
+                                # Download button'u hemen göster
+                                st.download_button(
+                                    label="📥 Kullanıcı Özet Raporunu İndir",
+                                    data=excel_buffer,
+                                    file_name=f"kullanici_ozet_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True,
+                                    key="user_summary_download"  # Unique key for Streamlit Cloud
+                                )
+                            else:
+                                st.error("Excel dosyası oluşturulamadı")
+                        except Exception as excel_error:
+                            st.error(f"Excel oluşturma hatası: {str(excel_error)}")
+                            st.write("Debug: Excel buffer oluşturma başarısız")
                         
                         st.divider()
                         
@@ -908,6 +920,23 @@ def main():
 
                 except Exception as e:
                     st.error(f"Özet rapor hatası: {str(e)}")
+
+            # Streamlit Cloud için ayrı download bölümü
+            if hasattr(st.session_state, 'user_summary_excel') and st.session_state.user_summary_excel:
+                st.subheader("📥 İndirme Seçenekleri")
+                
+                # Kullanıcı özet raporu download
+                st.download_button(
+                    label="📥 Kullanıcı Özet Raporunu İndir (Yedek)",
+                    data=st.session_state.user_summary_excel,
+                    file_name=st.session_state.user_summary_filename,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="backup_user_summary_download"
+                )
+                
+                st.info("ℹ️ Eğer yukarıdaki indirme butonu görünmüyorsa, bu yedek butonu kullanabilirsiniz.")
+                st.divider()
 
         # Temizle
         if st.button("🗑️ Sonuçları Temizle", use_container_width=True):
