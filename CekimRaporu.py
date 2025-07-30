@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 import os
 import pytz
 import time
-import pyperclip
 
 # Sayfa konfigürasyonu
 st.set_page_config(
@@ -111,14 +110,17 @@ def format_turkish_currency(amount):
     except (ValueError, TypeError):
         return "0,00 TL"
 
-# Clipboard kopyalama fonksiyonu
-def copy_to_clipboard(text):
-    """Metni clipboard'a kopyala"""
-    try:
-        pyperclip.copy(text)
-        return True
-    except:
-        return False
+# Streamlit-native kopyalama için yardımcı fonksiyon
+def create_copy_button(text, button_text="📋 Kopyala", key=None):
+    """Streamlit ile kopyalanabilir metin alanı oluştur"""
+    # Streamlit'in kendi kopyalama özelliği ile text_area kullan
+    return st.text_area(
+        "Kopyalamak için metni seçin (Ctrl+A, Ctrl+C):",
+        text,
+        height=200,
+        key=key,
+        help="Metni seçmek için Ctrl+A, kopyalamak için Ctrl+C kullanın"
+    )
 
 # Token yönetimi fonksiyonları
 def load_config():
