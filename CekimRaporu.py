@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import requests
 import json
 import pandas as pd
@@ -110,17 +111,61 @@ def format_turkish_currency(amount):
     except (ValueError, TypeError):
         return "0,00 TL"
 
-# Streamlit-native kopyalama için yardımcı fonksiyon
+# JavaScript tabanlı kopyalama butonu
 def create_copy_button(text, button_text="📋 Kopyala", key=None):
-    """Streamlit ile kopyalanabilir metin alanı oluştur"""
-    # Streamlit'in kendi kopyalama özelliği ile text_area kullan
-    return st.text_area(
-        "Kopyalamak için metni seçin (Ctrl+A, Ctrl+C):",
-        text,
-        height=200,
-        key=key,
-        help="Metni seçmek için Ctrl+A, kopyalamak için Ctrl+C kullanın"
-    )
+    """JavaScript ile tek tıkla kopyalama butonu oluştur"""
+    # Benzersiz ID oluştur
+    button_id = f"copy_btn_{key}" if key else "copy_btn"
+    text_id = f"copy_text_{key}" if key else "copy_text"
+    
+    # JavaScript kodu
+    copy_script = f"""
+    <div>
+        <textarea id="{text_id}" style="width: 100%; height: 200px; font-family: monospace; font-size: 12px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" readonly>{text}</textarea>
+        <br><br>
+        <button id="{button_id}" onclick="copyToClipboard()" style="background-color: #ff4b4b; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold;">
+            {button_text}
+        </button>
+        <span id="copy_status_{key}" style="margin-left: 10px; color: green; font-weight: bold;"></span>
+    </div>
+    
+    <script>
+    function copyToClipboard() {{
+        const textArea = document.getElementById('{text_id}');
+        const statusSpan = document.getElementById('copy_status_{key}');
+        
+        // Modern tarayıcılar için Clipboard API
+        if (navigator.clipboard) {{
+            navigator.clipboard.writeText(textArea.value).then(function() {{
+                statusSpan.innerHTML = '✅ Kopyalandı!';
+                setTimeout(() => statusSpan.innerHTML = '', 3000);
+            }}).catch(function(err) {{
+                // Fallback yöntemi
+                fallbackCopy();
+            }});
+        }} else {{
+            // Eski tarayıcılar için fallback
+            fallbackCopy();
+        }}
+        
+        function fallbackCopy() {{
+            textArea.select();
+            textArea.setSelectionRange(0, 99999);
+            try {{
+                document.execCommand('copy');
+                statusSpan.innerHTML = '✅ Kopyalandı!';
+                setTimeout(() => statusSpan.innerHTML = '', 3000);
+            }} catch (err) {{
+                statusSpan.innerHTML = '❌ Kopyalama başarısız - Manuel seçin';
+                setTimeout(() => statusSpan.innerHTML = '', 5000);
+            }}
+        }}
+    }}
+    </script>
+    """
+    
+    # HTML komponenti olarak render et
+    components.html(copy_script, height=280)
 
 # Token yönetimi fonksiyonları
 def load_config():
@@ -1654,25 +1699,11 @@ if 'withdrawal_data' in st.session_state and st.session_state.withdrawal_data:
                     if bank_requests:
                         report = create_withdrawal_report(bank_requests)
                         if report:
-                            try:
-                                pyperclip.copy(report)
-                                st.success("✅ Rapor başarıyla clipboard'a kopyalandı!")
-                                
-                                # Raporu önizleme olarak göster
-                                with st.expander("📄 Rapor Önizleme"):
-                                    st.text(report)
-                                    
-                                    # Ayrı kopyalama butonu
-                                    if st.button("📋 Tekrar Kopyala", key="copy_withdrawal_again"):
-                                        try:
-                                            pyperclip.copy(report)
-                                            st.success("✅ Tekrar kopyalandı!")
-                                        except:
-                                            st.error("❌ Kopyalama başarısız")
-                                
-                            except Exception as e:
-                                st.error(f"❌ Clipboard'a kopyalama hatası: {str(e)}")
-                                st.text_area("📄 Manuel Kopyalama için Rapor:", report, height=200)
+                            st.success("✅ Çekim raporu hazırlandı!")
+                            
+                            # JavaScript tabanlı kopyalama butonu ile raporu göster
+                            st.markdown("### 📄 Çekim Raporu")
+                            create_copy_button(report, "📋 Çekim Raporunu Kopyala", "withdrawal_report")
                         else:
                             st.warning("⚠️ Rapor oluşturulamadı - veri eksik olabilir")
                     else:
@@ -1690,31 +1721,11 @@ if 'withdrawal_data' in st.session_state and st.session_state.withdrawal_data:
                                 fraud_report = create_fraud_report(selected_request, client_id)
                                 
                                 if fraud_report:
-                                    # Clipboard kopylama denemesi (hatayı sessizce yakala)
-                                    clipboard_success = False
-                                    try:
-                                        pyperclip.copy(fraud_report)
-                                        clipboard_success = True
-                                        st.success("✅ Fraud raporu clipboard'a kopyalandı!")
-                                    except:
-                                        # Clipboard çalışmıyorsa sessizce geç
-                                        pass
+                                    st.success("✅ Fraud raporu hazırlandı!")
                                     
-                                    # Her durumda raporu göster
-                                    if not clipboard_success:
-                                        st.info("📋 Fraud raporu hazırlandı (manuel kopyalayın):")
-                                    
-                                    st.text_area("🚨 Fraud Raporu:", fraud_report, height=300)
-                                    
-                                    # Ayrı kopyalama butonu
-                                    col_copy1, col_copy2 = st.columns([1, 3])
-                                    with col_copy1:
-                                        if st.button("📋 Kopyala", key="copy_fraud_report"):
-                                            try:
-                                                pyperclip.copy(fraud_report)
-                                                st.success("✅ Kopyalandı!")
-                                            except:
-                                                st.error("❌ Kopyalama başarısız")
+                                    # JavaScript tabanlı kopyalama butonu ile raporu göster
+                                    st.markdown("### 🚨 Fraud Raporu")
+                                    create_copy_button(fraud_report, "📋 Fraud Raporunu Kopyala", "fraud_report")
                                 else:
                                     st.error("❌ Fraud raporu oluşturulamadı")
                         else:
