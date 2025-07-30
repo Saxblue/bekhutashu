@@ -93,11 +93,24 @@ st.markdown("""
 
 <div class="red-dot-container">
     <div class="tooltip">
-        <div class="red-dot" onclick="window.open('https://cekimraporu.streamlit.app/', '_blank')"></div>
+        <a href="https://cekimraporu.streamlit.app/" target="_blank" style="text-decoration: none;">
+            <div class="red-dot"></div>
+        </a>
         <span class="tooltiptext">Çekim Raporu</span>
     </div>
 </div>
 """, unsafe_allow_html=True)
+
+# Alternatif çözüm: Streamlit sidebar'da link butonu
+with st.sidebar:
+    st.markdown("---")
+    if st.button("🔴 Çekim Raporu", help="Çekim Raporu uygulamasına git"):
+        st.markdown("""
+        <script>
+        window.open('https://cekimraporu.streamlit.app/', '_blank');
+        </script>
+        """, unsafe_allow_html=True)
+        st.info("🔗 Yeni sekmede açılıyor: https://cekimraporu.streamlit.app/")
 
 # ========================= UTILITY FUNCTIONS =========================
 
