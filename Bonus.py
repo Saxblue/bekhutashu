@@ -779,7 +779,7 @@ def main():
     # API Ayarları Modal
     if st.session_state.get("show_api_settings", False):
         with st.container():
-            st.markdown("### ⚙️ API Ayarları")
+            st.markdown("###⚙️ API Ayarları")
             
             settings = load_settings()
             
@@ -896,13 +896,11 @@ def main():
             # Varsayılan başlangıç tarihi (7 gün önce)
             default_start = datetime.now() - timedelta(days=7)
             start_date = st.date_input("Başlangıç Tarihi:",
-                                       value=default_start,
-                                       max_value=datetime.now())
+                                       value=default_start)
 
         with col_end:
             end_date = st.date_input("Bitiş Tarihi:",
-                                     value=datetime.now(),
-                                     max_value=datetime.now())
+                                     value=datetime.now())
 
         # Diğer filtreler
         col_user, col_bonus = st.columns(2)
