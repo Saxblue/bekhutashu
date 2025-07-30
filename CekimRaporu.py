@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import os
 import pytz
 import time
+import pyperclip
 
 # Sayfa konfigürasyonu
 st.set_page_config(
@@ -86,6 +87,39 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+# Para formatlaması fonksiyonu
+def format_turkish_currency(amount):
+    """Türk Lirası formatında para birimi formatla (1.000,00 TL)"""
+    try:
+        if amount is None or amount == "" or (isinstance(amount, str) and amount.strip() == ""):
+            return "0,00 TL"
+        
+        # String ise float'a çevir
+        if isinstance(amount, str):
+            amount = float(amount.replace(',', '.'))
+        
+        # Float'a çevir
+        amount = float(amount)
+        
+        # Türk formatında formatla: 1.000,00 TL
+        formatted = f"{amount:,.2f} TL"
+        # Nokta ve virgülü değiştir (Türk formatı için)
+        formatted = formatted.replace(',', 'X').replace('.', ',').replace('X', '.')
+        
+        return formatted
+    
+    except (ValueError, TypeError):
+        return "0,00 TL"
+
+# Clipboard kopyalama fonksiyonu
+def copy_to_clipboard(text):
+    """Metni clipboard'a kopyala"""
+    try:
+        pyperclip.copy(text)
+        return True
+    except:
+        return False
+
 # Token yönetimi fonksiyonları
 def load_config():
     """Konfigürasyon dosyasından ayarları yükle"""
@@ -683,10 +717,12 @@ def create_withdrawal_report(selected_requests):
     for request in selected_requests:
         if request.get("PaymentSystemName") == "BankTransferBME":
             bank_info = parse_bank_info(request.get("Info", ""))
+            formatted_amount = format_turkish_currency(request.get('Amount', 0))
+            
             report += f"İsimSoyisim : {bank_info['isim']}\n"
             report += f"İban : {bank_info['iban']}\n"
             report += f"Banka : {bank_info['banka']}\n"
-            report += f"Miktar : {request.get('Amount', 0)}\n"
+            report += f"Miktar : {formatted_amount}\n"
             report += "-" * 40 + "\n"
     
     return report
@@ -998,9 +1034,12 @@ def create_fraud_report(withdrawal_request, client_id):
             # Finansal analiz ekle
             if total_deposits > 0 and total_withdrawals > 0:
                 deposit_withdrawal_ratio = total_withdrawals / total_deposits
+                avg_deposit = total_deposits/deposit_count if deposit_count > 0 else 0
+                avg_withdrawal = total_withdrawals/withdrawal_count if withdrawal_count > 0 else 0
+                
                 game_desc += f"- Yatırım/Çekim oranı: %{int(deposit_withdrawal_ratio * 100)}\n"
-                game_desc += f"- Ortalama yatırım: {total_deposits/deposit_count:.2f} TL\n"
-                game_desc += f"- Ortalama çekim: {total_withdrawals/withdrawal_count:.2f} TL\n"
+                game_desc += f"- Ortalama yatırım: {format_turkish_currency(avg_deposit)}\n"
+                game_desc += f"- Ortalama çekim: {format_turkish_currency(avg_withdrawal)}\n"
                 
                 # Yatırım/çekim trend analizi
                 if total_deposits > total_withdrawals:
@@ -1121,18 +1160,25 @@ def create_fraud_report(withdrawal_request, client_id):
         else:
             st.warning("⚠️ Client detayları alınamadı - varsayılan değerler kullanılıyor")
         
+        # Para değerlerini formatla
+        formatted_request_amount = format_turkish_currency(request_amount)
+        formatted_last_deposit = format_turkish_currency(last_deposit)
+        formatted_current_balance = format_turkish_currency(current_balance)
+        formatted_total_deposits = format_turkish_currency(total_deposits)
+        formatted_total_withdrawals = format_turkish_currency(total_withdrawals)
+        
         # Fraud raporu formatı
         report = f"""İsim Soyisim   : {full_name}
 K. Adı         : {username}
-Talep Miktarı  : {request_amount} TL
+Talep Miktarı  : {formatted_request_amount}
 Talep yöntemi  : {payment_method}
-Yatırım Miktarı: {last_deposit} TL
+Yatırım Miktarı: {formatted_last_deposit}
 Oyun Türü      : {game_type}
-Arka Bakiye    : {current_balance} TL
+Arka Bakiye    : {formatted_current_balance}
 Oyuna Devam    : {game_status}
 
-T. Yatırım Miktarı: {total_deposits} TL
-T. Çekim Miktarı  : {total_withdrawals} TL
+T. Yatırım Miktarı: {formatted_total_deposits}
+T. Çekim Miktarı  : {formatted_total_withdrawals}
 T. Çekim Adedi    : {withdrawal_count}
 T. Yatırım Adedi  : {deposit_count}
 Açıklama          : 
@@ -1613,6 +1659,14 @@ if 'withdrawal_data' in st.session_state and st.session_state.withdrawal_data:
                                 # Raporu önizleme olarak göster
                                 with st.expander("📄 Rapor Önizleme"):
                                     st.text(report)
+                                    
+                                    # Ayrı kopyalama butonu
+                                    if st.button("📋 Tekrar Kopyala", key="copy_withdrawal_again"):
+                                        try:
+                                            pyperclip.copy(report)
+                                            st.success("✅ Tekrar kopyalandı!")
+                                        except:
+                                            st.error("❌ Kopyalama başarısız")
                                 
                             except Exception as e:
                                 st.error(f"❌ Clipboard'a kopyalama hatası: {str(e)}")
@@ -1649,6 +1703,16 @@ if 'withdrawal_data' in st.session_state and st.session_state.withdrawal_data:
                                         st.info("📋 Fraud raporu hazırlandı (manuel kopyalayın):")
                                     
                                     st.text_area("🚨 Fraud Raporu:", fraud_report, height=300)
+                                    
+                                    # Ayrı kopyalama butonu
+                                    col_copy1, col_copy2 = st.columns([1, 3])
+                                    with col_copy1:
+                                        if st.button("📋 Kopyala", key="copy_fraud_report"):
+                                            try:
+                                                pyperclip.copy(fraud_report)
+                                                st.success("✅ Kopyalandı!")
+                                            except:
+                                                st.error("❌ Kopyalama başarısız")
                                 else:
                                     st.error("❌ Fraud raporu oluşturulamadı")
                         else:
