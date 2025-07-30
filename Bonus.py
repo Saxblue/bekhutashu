@@ -387,8 +387,22 @@ class BonusAPIHandler:
         """API isteği için payload oluştur - Tkinter versiyonuna uygun"""
         try:
             # Tarihleri string'e çevir
-            start_date = format_date_for_api(filters["start_date"])
-            end_date = format_date_for_api(filters["end_date"])
+            start_date_obj = filters["start_date"]
+            end_date_obj = filters["end_date"]
+            
+            # Başlangıç tarihi: günün başı (00:00:00)
+            if isinstance(start_date_obj, str):
+                start_date_obj = datetime.strptime(start_date_obj, '%Y-%m-%d').date()
+            start_dt = datetime.combine(start_date_obj, datetime.min.time())
+            
+            # Bitiş tarihi: günün sonu (23:59:59)
+            if isinstance(end_date_obj, str):
+                end_date_obj = datetime.strptime(end_date_obj, '%Y-%m-%d').date()
+            end_dt = datetime.combine(end_date_obj, datetime.max.time())
+            
+            # API formatına çevir
+            start_date = start_dt.strftime("%d-%m-%y - %H:%M:%S")
+            end_date = end_dt.strftime("%d-%m-%y - %H:%M:%S")
             
             # Debug log
             print(f"Start date: {start_date}")
