@@ -15,6 +15,94 @@ st.set_page_config(
     layout="wide"
 )
 
+# Sağ üst köşeye yeşil nokta butonu ekle
+st.markdown("""
+<style>
+.green-dot-container {
+    position: fixed;
+    top: 60px;
+    right: 20px;
+    z-index: 999;
+}
+
+.green-dot {
+    width: 12px;
+    height: 12px;
+    background-color: #28a745;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    transition: all 0.3s ease;
+    animation: pulse-green 2s infinite;
+}
+
+.green-dot:hover {
+    background-color: #1e7e34;
+    transform: scale(1.2);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+}
+
+@keyframes pulse-green {
+    0% {
+        box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(40, 167, 69, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(40, 167, 69, 0);
+    }
+}
+
+.tooltip {
+    position: relative;
+    display: inline-block;
+}
+
+.tooltip .tooltiptext {
+    visibility: hidden;
+    width: 120px;
+    background-color: #333;
+    color: white;
+    text-align: center;
+    border-radius: 6px;
+    padding: 5px;
+    position: absolute;
+    z-index: 1;
+    bottom: 125%;
+    left: 50%;
+    margin-left: -60px;
+    opacity: 0;
+    transition: opacity 0.3s;
+    font-size: 12px;
+}
+
+.tooltip:hover .tooltiptext {
+    visibility: visible;
+    opacity: 1;
+}
+</style>
+
+<div class="green-dot-container">
+    <div class="tooltip">
+        <a href="https://bonusraporu.streamlit.app/" target="_blank" style="text-decoration: none;">
+            <div class="green-dot"></div>
+        </a>
+        <span class="tooltiptext">Bonus Raporu</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# Alternatif çözüm: Streamlit sidebar'da link butonu
+with st.sidebar:
+    st.markdown("---")
+    if st.button("🟢 Bonus Raporu", help="Bonus Raporu uygulamasına git"):
+        st.markdown("""
+        <script>
+        window.open('https://bonusraporu.streamlit.app/', '_blank');
+        </script>
+        """, unsafe_allow_html=True)
+        st.info("🔗 Yeni sekmede açılıyor: https://bonusraporu.streamlit.app/")
 
 # CSS stilleri ekleme
 st.markdown("""
