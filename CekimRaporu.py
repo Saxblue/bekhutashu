@@ -2038,3 +2038,4 @@ with tab2:
 # Footer
 st.markdown("---")
 st.markdown("*BetConstruct Çekim Talepleri Yönetim Sistemi*")
+
