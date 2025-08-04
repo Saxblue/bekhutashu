@@ -13,7 +13,7 @@ from io import BytesIO
 
 # Sayfa konfigürasyonu
 st.set_page_config(
-    page_title="BetConstruct Rapor",
+    page_title="BetConstruct Çekim Talepleri Yönetimi",
     page_icon="💰",
     layout="wide"
 )
@@ -1395,7 +1395,7 @@ def sort_requests_by_status_and_date(requests):
 # Streamlit UI
 col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
 with col1:
-    st.title("💰 BetConstruct Rapor")
+    st.title("💰 BetConstruct Çekim Talepleri Yönetimi")
 with col2:
     # Seçilen talep bilgisi
     if 'selected_request_for_action' in st.session_state:
@@ -1453,352 +1453,345 @@ if st.session_state.get('show_settings', False):
                 st.rerun()
 
 # Tab sistemi ekle
-tab1, tab2, tab3 = st.tabs(["💰 Çekim Talepleri", "📊 Bahis Raporu", "📈 Performans Analizi"])
+tab1, tab2, tab3, tab4 = st.tabs(["💰 Çekim Talepleri", "📊 Bahis Raporu", "📈 Performans Analizi", "🏆 Bonus Raporu"])
 
 with tab1:
     st.markdown("---")
 
-    # Sidebar - Filtreler
+    # Sidebar - Filtreler (sadece Çekim Talepleri sekmesi için)
     st.sidebar.header("🔍 Filtreler")
 
-# Tarih seçimi
-col1, col2 = st.sidebar.columns(2)
-with col1:
-    date_from = st.date_input(
-        "Başlangıç Tarihi",
-        value=datetime.now().date()
+    # Tarih seçimi
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        date_from = st.date_input(
+            "Başlangıç Tarihi",
+            value=datetime.now().date()
+        )
+    with col2:
+        date_to = st.date_input(
+            "Bitiş Tarihi", 
+            value=datetime.now().date()
+        )
+
+    # Durum filtresi
+    selected_status = st.sidebar.selectbox(
+        "Durum Filtresi",
+        options=list(STATUS_MAPPING.keys()),
+        index=0
     )
-with col2:
-    date_to = st.date_input(
-        "Bitiş Tarihi", 
-        value=datetime.now().date()
+
+    # Ödeme sistemi filtresi - dinamik olarak oluşturulacak
+    if 'withdrawal_data' in st.session_state and st.session_state.withdrawal_data:
+        payment_systems = set()
+        for req in st.session_state.withdrawal_data:
+            if isinstance(req, dict) and req.get("PaymentSystemName"):
+                payment_systems.add(req["PaymentSystemName"])
+        payment_options = ["Tümü"] + sorted(list(payment_systems))
+    else:
+        payment_options = ["Tümü", "BankTransferBME", "HedefHavale", "ScashMoneyBankTransfer"]
+
+    payment_system_filter = st.sidebar.selectbox(
+        "Ödeme Sistemi Filtresi",
+        options=payment_options,
+        index=0
     )
 
-# Durum filtresi
-selected_status = st.sidebar.selectbox(
-    "Durum Filtresi",
-    options=list(STATUS_MAPPING.keys()),
-    index=0
-)
+    # Sayfa boyutu
+    page_size = st.sidebar.selectbox(
+        "Sayfa Boyutu",
+        options=[10, 25, 50, 100, 500, 1000],
+        index=3  # Default 100
+    )
 
-# Ödeme sistemi filtresi - dinamik olarak oluşturulacak
-if 'withdrawal_data' in st.session_state and st.session_state.withdrawal_data:
-    payment_systems = set()
-    for req in st.session_state.withdrawal_data:
-        if isinstance(req, dict) and req.get("PaymentSystemName"):
-            payment_systems.add(req["PaymentSystemName"])
-    payment_options = ["Tümü"] + sorted(list(payment_systems))
-else:
-    payment_options = ["Tümü", "BankTransferBME", "HedefHavale", "ScashMoneyBankTransfer"]
+    # İstemci tarafı filtreleme açık/kapalı
+    client_side_filter = st.sidebar.checkbox(
+        "🔧 İstemci Tarafı Tarih Filtrelemesi",
+        value=True,
+        help="API tarih filtrelemesi çalışmıyorsa otomatik olarak istemci tarafında filtreleme yapar"
+    )
 
-payment_system_filter = st.sidebar.selectbox(
-    "Ödeme Sistemi Filtresi",
-    options=payment_options,
-    index=0
-)
-
-# Sayfa boyutu
-page_size = st.sidebar.selectbox(
-    "Sayfa Boyutu",
-    options=[10, 25, 50, 100, 500, 1000],
-    index=3  # Default 100
-)
-
-# İstemci tarafı filtreleme açık/kapalı
-client_side_filter = st.sidebar.checkbox(
-    "🔧 İstemci Tarafı Tarih Filtrelemesi",
-    value=True,
-    help="API tarih filtrelemesi çalışmıyorsa otomatik olarak istemci tarafında filtreleme yapar"
-)
-
-
-
-
-
-# Talepleri getir butonu
-if st.sidebar.button("📋 Talepleri Gör", type="primary"):
-    
-    if date_from <= date_to:
-        with st.spinner("Çekim talepleri getiriliyor..."):
-            # Tüm veriyi getir, filtreleme client-side yapılacak
-            all_data = []
-            current_page = 1
-            total_fetched = 0
-            
-            # Tüm verileri sayfalayarak getir
-            while total_fetched < page_size:
-                remaining = page_size - total_fetched
-                current_page_size = min(100, remaining)  # API max 100'er getir
+    # Talepleri getir butonu
+    if st.sidebar.button("📋 Talepleri Gör", type="primary"):
+        if date_from <= date_to:
+            with st.spinner("Çekim talepleri getiriliyor..."):
+                # Tüm veriyi getir, filtreleme client-side yapılacak
+                all_data = []
+                current_page = 1
+                total_fetched = 0
                 
-                data = fetch_withdrawal_requests(
-                    datetime.combine(date_from, datetime.min.time()),
-                    datetime.combine(date_to, datetime.max.time()),
-                    [],
-                    page=current_page,
-                    page_size=current_page_size,
-                    timezone_format="UTC"
-                )
-                
-                if data and isinstance(data, dict) and "Data" in data:
-                    data_section = data["Data"]
-                    if "ClientRequests" in data_section and data_section["ClientRequests"]:
-                        page_requests = data_section["ClientRequests"]
-                        all_data.extend(page_requests)
-                        total_fetched += len(page_requests)
-                        
-                        # Eğer daha az veri geldi ise son sayfa
-                        if len(page_requests) < current_page_size:
+                # Tüm verileri sayfalayarak getir
+                while total_fetched < page_size:
+                    remaining = page_size - total_fetched
+                    current_page_size = min(100, remaining)  # API max 100'er getir
+                    
+                    data = fetch_withdrawal_requests(
+                        datetime.combine(date_from, datetime.min.time()),
+                        datetime.combine(date_to, datetime.max.time()),
+                        [],
+                        page=current_page,
+                        page_size=current_page_size,
+                        timezone_format="UTC"
+                    )
+                    
+                    if data and isinstance(data, dict) and "Data" in data:
+                        data_section = data["Data"]
+                        if "ClientRequests" in data_section and data_section["ClientRequests"]:
+                            page_requests = data_section["ClientRequests"]
+                            all_data.extend(page_requests)
+                            total_fetched += len(page_requests)
+                            
+                            # Eğer daha az veri geldi ise son sayfa
+                            if len(page_requests) < current_page_size:
+                                break
+                        else:
                             break
                     else:
                         break
-                else:
-                    break
-                
-                current_page += 1
-                
-                # Güvenlik için max 10 sayfa
-                if current_page > 10:
-                    break
-            
-            if all_data:
-                # İstemci tarafında tarih filtrelemesi uygula
-                if client_side_filter:
-                    filtered_data = filter_requests_by_date(all_data, date_from, date_to)
-                    all_data = filtered_data
+                    
+                    current_page += 1
+                    
+                    # Güvenlik için max 10 sayfa
+                    if current_page > 10:
+                        break
                 
                 if all_data:
-                    # Yeni talepler en üstte olacak şekilde sırala
-                    sorted_data = sort_requests_by_status_and_date(all_data)
-                    st.session_state.withdrawal_data = sorted_data
-                    st.session_state.selected_status = selected_status
-                    st.session_state.payment_system_filter = payment_system_filter
+                    # İstemci tarafında tarih filtrelemesi uygula
+                    if client_side_filter:
+                        filtered_data = filter_requests_by_date(all_data, date_from, date_to)
+                        all_data = filtered_data
                     
-                    # Yeni talep sayısını göster ve bildirim gönder
-                    new_count = len([req for req in sorted_data 
-                                   if isinstance(req, dict) and req.get("StateName") in ["Yeni", "New"]])
-                    
-                    # Önceki yeni talep sayısı ile karşılaştır
-                    previous_new_count = st.session_state.get('previous_new_count', 0)
-                    
-                    # Yeni talep geldi mi kontrol et (sessizce)
-                    if new_count > previous_new_count:
-                        new_diff = new_count - previous_new_count
+                    if all_data:
+                        # Yeni talepler en üstte olacak şekilde sırala
+                        sorted_data = sort_requests_by_status_and_date(all_data)
+                        st.session_state.withdrawal_data = sorted_data
+                        st.session_state.selected_status = selected_status
+                        st.session_state.payment_system_filter = payment_system_filter
                         
-                        # Basit bildirim (otomatik yenileme kaldırıldığından sadece bilgi)
-                        st.toast(f"🆕 {new_diff} yeni çekim talebi tespit edildi!", icon="🔔")
-
-                    
-                    # Önceki sayıyı güncelle
-                    st.session_state.previous_new_count = new_count
-                else:
-                    st.warning("⚠️ Seçilen tarih aralığında veri bulunamadı")
-            else:
-                st.error("❌ API'den veri alınamadı")
-    else:
-        st.sidebar.error("❌ Başlangıç tarihi bitiş tarihinden büyük olamaz!")
-
-
-else:
-    # Auto-refresh kapalıysa timer'ı temizle
-    st.markdown("""
-    <script>
-    if (window.autoRefreshTimer) {
-        clearInterval(window.autoRefreshTimer);
-        window.autoRefreshTimer = null;
-        console.log('Otomatik yenileme durduruldu');
-    }
-    </script>
-    """, unsafe_allow_html=True)
-
-# Ana içerik
-if 'withdrawal_data' in st.session_state and st.session_state.withdrawal_data:
-    
-    # Durum ve ödeme sistemi filtrelemesi uygula
-    current_status_filter = st.session_state.get('selected_status', 'Tümü')
-    current_payment_filter = st.session_state.get('payment_system_filter', 'Tümü')
-    filtered_data = []
-    
-    for request in st.session_state.withdrawal_data:
-        if isinstance(request, dict):
-            status_text = request.get("StateName", "")
-            payment_system = request.get("PaymentSystemName", "")
-            
-            # Durum filtresi kontrolü
-            status_match = False
-            if current_status_filter == "Tümü":
-                status_match = True
-            else:
-                target_statuses = STATUS_MAPPING.get(current_status_filter, [])
-                status_match = status_text in target_statuses
-            
-            # Ödeme sistemi filtresi kontrolü
-            payment_match = False
-            if current_payment_filter == "Tümü":
-                payment_match = True
-            else:
-                payment_match = payment_system == current_payment_filter
-            
-            # Her iki filtre de geçerse ekle
-            if status_match and payment_match:
-                filtered_data.append(request)
-    
-    # Sağ üst köşeye sabit onay/red butonları (placeholder div)
-    st.markdown('<div id="action-buttons-placeholder"></div>', unsafe_allow_html=True)
-
-    # Kompakt başlık
-    new_count = len([req for req in filtered_data 
-                   if isinstance(req, dict) and req.get("StateName") in ["Yeni", "New"]])
-    
-    col1, col2, col3 = st.columns([2, 1, 1])
-    with col1:
-        st.markdown(f"**📊 Çekim Talepleri** ({len(filtered_data)} adet)")
-    with col2:
-        if new_count > 0:
-            st.markdown(f"🆕 **{new_count} Yeni**")
-    with col3:
-        filter_text = current_status_filter
-        if current_payment_filter != "Tümü":
-            filter_text += f" + {current_payment_filter}"
-        st.markdown(f"*Filtre: {filter_text}*")
-    
-    # Tablo için veri hazırlama
-    table_data = []
-    for idx, request in enumerate(filtered_data):
-        if isinstance(request, dict):
-            # Durum bilgisini al - API'den gelen StateName alanını kullan
-            status_text = request.get("StateName", "Bilinmeyen")
-            
-            # Eğer StateName yoksa State kodunu kontrol et
-            if not status_text or status_text == "Bilinmeyen":
-                state_code = request.get("State")
-                if state_code is not None:
-                    status_mapping = {
-                        0: "Yeni",
-                        1: "İzin Verildi", 
-                        2: "Beklemede",
-                        3: "Reddedildi",
-                        4: "İptal edildi",
-                        5: "Ödendi"
-                    }
-                    status_text = status_mapping.get(state_code, "Bilinmeyen")
-            
-            # İsim bilgisi
-            full_name = ""
-            if "ClientName" in request:
-                full_name = str(request["ClientName"])
-            elif "FirstName" in request and "LastName" in request:
-                full_name = f"{request['FirstName']} {request['LastName']}".strip()
-            
-            # Kullanıcı adı - API'den ClientLogin alanını kullan
-            username = request.get("ClientLogin", "-")
-            
-            # Oyuncu kimliği - API'den ClientId alanını kullan
-            player_id = str(request.get("ClientId", "-"))
-            
-            # Durum ile emoji gösterimi
-            if status_text in ["Ödendi", "Paid"]:
-                status_display = "🟢 " + status_text
-            elif status_text in ["Reddedildi", "Rejected", "Cancelled"]:
-                status_display = "🔴 " + status_text  
-            elif status_text in ["Yeni", "New"]:
-                status_display = "🔵 " + status_text
-            else:
-                status_display = "⚪ " + status_text
-            
-            table_data.append({
-                "Seç": False,
-                "Index": idx,
-                "Durum": status_display,
-                "Ödeme Sistemi": request.get("PaymentSystemName", "-"),
-                "Müşteri Adı": full_name if full_name else "-",
-                "Kullanıcı Adı": username,
-                "Oyuncu ID": player_id,
-                "Miktar (TL)": f"{float(request.get('Amount', 0)):.2f}",
-                "Talep Tarihi": request.get('RequestTimeLocal', '-')[:16] if request.get('RequestTimeLocal') else '-',
-                "Bilgi": str(request.get("Info", "-"))[:30] + "..." if len(str(request.get("Info", ""))) > 30 else str(request.get("Info", "-"))
-            })
-    
-    if table_data:
-        # DataFrame oluştur
-        df = pd.DataFrame(table_data)
-        
-        # Veri editörü ile tablo göster
-        edited_df = st.data_editor(
-            df,
-            column_config={
-                "Seç": st.column_config.CheckboxColumn(
-                    "Seç",
-                    help="Rapor için talepleri seçin",
-                    default=False,
-                ),
-                "Index": None,  # Gizle
-                "Durum": st.column_config.TextColumn(
-                    "Durum",
-                    width="small"
-                ),
-                "Ödeme Sistemi": st.column_config.TextColumn(
-                    "Ödeme Sistemi",
-                    width="medium"
-                ),
-                "Miktar (TL)": st.column_config.NumberColumn(
-                    "Miktar (TL)",
-                    format="%.2f"
-                ),
-                "Talep Tarihi": st.column_config.TextColumn(
-                    "Talep Tarihi",
-                    width="medium"
-                ),
-                "Bilgi": st.column_config.TextColumn(
-                    "Bilgi",
-                    width="large"
-                )
-            },
-            hide_index=True,
-            use_container_width=True
-        )
-        
-
-
-
-        # Tablo seçimini kontrol et - sidebar'da işlem yapmak için
-        selected_for_action = edited_df[edited_df["Seç"] == True]
-        if len(selected_for_action) == 1:
-            # Tek bir talep seçiliyse sidebar'da işlem için hazırla
-            selected_idx = selected_for_action["Index"].iloc[0]
-            st.session_state.selected_request_for_action = filtered_data[selected_idx]
-        elif len(selected_for_action) > 1:
-            # Birden fazla seçim varsa sidebar seçimini temizle
-            if 'selected_request_for_action' in st.session_state:
-                del st.session_state.selected_request_for_action
-
-        # Seçilen talepler için rapor oluşturma
-        selected_indices = edited_df[edited_df["Seç"]]["Index"].tolist()
-        
-        if selected_indices:
-            st.markdown("---")
-            st.subheader(f"✅ {len(selected_indices)} talep seçildi")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("📄 Çekim Raporu Oluştur", type="primary"):
-                    selected_requests = [filtered_data[i] for i in selected_indices]
-                    
-                    # BankTransferBME taleplerini filtrele
-                    bank_requests = [req for req in selected_requests if req.get("PaymentSystemName") == "BankTransferBME"]
-                    
-                    if bank_requests:
-                        report = create_withdrawal_report(bank_requests)
-                        if report:
-                            st.success("✅ Çekim raporu hazırlandı!")
+                        # Yeni talep sayısını göster ve bildirim gönder
+                        new_count = len([req for req in sorted_data 
+                                       if isinstance(req, dict) and req.get("StateName") in ["Yeni", "New"]])
+                        
+                        # Önceki yeni talep sayısı ile karşılaştır
+                        previous_new_count = st.session_state.get('previous_new_count', 0)
+                        
+                        # Yeni talep geldi mi kontrol et (sessizce)
+                        if new_count > previous_new_count:
+                            new_diff = new_count - previous_new_count
                             
-                            # JavaScript tabanlı kopyalama butonu ile raporu göster
-                            st.markdown("### 📄 Çekim Raporu")
-                            create_copy_button(report, "📋 Çekim Raporunu Kopyala", "withdrawal_report")
-                        else:
-                            st.warning("⚠️ Rapor oluşturulamadı - veri eksik olabilir")
+                            # Basit bildirim (otomatik yenileme kaldırıldığından sadece bilgi)
+                            st.toast(f"🆕 {new_diff} yeni çekim talebi tespit edildi!", icon="🔔")
+
+                        
+                        # Önceki sayıyı güncelle
+                        st.session_state.previous_new_count = new_count
                     else:
-                        st.warning("⚠️ Seçilen talepler arasında BankTransferBME ödeme sistemi bulunamadı")
+                        st.warning("⚠️ Seçilen tarih aralığında veri bulunamadı")
+                else:
+                    st.error("❌ API'den veri alınamadı")
+        else:
+            st.sidebar.error("❌ Başlangıç tarihi bitiş tarihinden büyük olamaz!")
+
+    else:
+        # Auto-refresh kapalıysa timer'ı temizle
+        st.markdown("""
+        <script>
+        if (window.autoRefreshTimer) {
+            clearInterval(window.autoRefreshTimer);
+            window.autoRefreshTimer = null;
+            console.log('Otomatik yenileme durduruldu');
+        }
+        </script>
+        """, unsafe_allow_html=True)
+
+    # Ana içerik - sadece tab1 için çekim talepleri göster
+    if 'withdrawal_data' in st.session_state and st.session_state.withdrawal_data:
+        # Durum ve ödeme sistemi filtrelemesi uygula
+        current_status_filter = st.session_state.get('selected_status', 'Tümü')
+        current_payment_filter = st.session_state.get('payment_system_filter', 'Tümü')
+        filtered_data = []
+        
+        for request in st.session_state.withdrawal_data:
+            if isinstance(request, dict):
+                status_text = request.get("StateName", "")
+                payment_system = request.get("PaymentSystemName", "")
+                
+                # Durum filtresi kontrolü
+                status_match = False
+                if current_status_filter == "Tümü":
+                    status_match = True
+                else:
+                    target_statuses = STATUS_MAPPING.get(current_status_filter, [])
+                    status_match = status_text in target_statuses
+                
+                # Ödeme sistemi filtresi kontrolü
+                payment_match = False
+                if current_payment_filter == "Tümü":
+                    payment_match = True
+                else:
+                    payment_match = payment_system == current_payment_filter
+                
+                # Her iki filtre de geçerse ekle
+                if status_match and payment_match:
+                    filtered_data.append(request)
+        
+        # Sağ üst köşeye sabit onay/red butonları (placeholder div)
+        st.markdown('<div id="action-buttons-placeholder"></div>', unsafe_allow_html=True)
+
+        # Kompakt başlık
+        new_count = len([req for req in filtered_data 
+                       if isinstance(req, dict) and req.get("StateName") in ["Yeni", "New"]])
+        
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col1:
+            st.markdown(f"**📊 Çekim Talepleri** ({len(filtered_data)} adet)")
+        with col2:
+            if new_count > 0:
+                st.markdown(f"🆕 **{new_count} Yeni**")
+        with col3:
+            filter_text = current_status_filter
+            if current_payment_filter != "Tümü":
+                filter_text += f" + {current_payment_filter}"
+            st.markdown(f"*Filtre: {filter_text}*")
+        
+        # Tablo için veri hazırlama
+        table_data = []
+        for idx, request in enumerate(filtered_data):
+            if isinstance(request, dict):
+                # Durum bilgisini al - API'den gelen StateName alanını kullan
+                status_text = request.get("StateName", "Bilinmeyen")
+                
+                # Eğer StateName yoksa State kodunu kontrol et
+                if not status_text or status_text == "Bilinmeyen":
+                    state_code = request.get("State")
+                    if state_code is not None:
+                        status_mapping = {
+                            0: "Yeni",
+                            1: "İzin Verildi", 
+                            2: "Beklemede",
+                            3: "Reddedildi",
+                            4: "İptal edildi",
+                            5: "Ödendi"
+                        }
+                        status_text = status_mapping.get(state_code, "Bilinmeyen")
+                
+                # İsim bilgisi
+                full_name = ""
+                if "ClientName" in request:
+                    full_name = str(request["ClientName"])
+                elif "FirstName" in request and "LastName" in request:
+                    full_name = f"{request['FirstName']} {request['LastName']}".strip()
+                
+                # Kullanıcı adı - API'den ClientLogin alanını kullan
+                username = request.get("ClientLogin", "-")
+                
+                # Oyuncu kimliği - API'den ClientId alanını kullan
+                player_id = str(request.get("ClientId", "-"))
+                
+                # Durum ile emoji gösterimi
+                if status_text in ["Ödendi", "Paid"]:
+                    status_display = "🟢 " + status_text
+                elif status_text in ["Reddedildi", "Rejected", "Cancelled"]:
+                    status_display = "🔴 " + status_text  
+                elif status_text in ["Yeni", "New"]:
+                    status_display = "🔵 " + status_text
+                else:
+                    status_display = "⚪ " + status_text
+                
+                table_data.append({
+                    "Seç": False,
+                    "Index": idx,
+                    "Durum": status_display,
+                    "Ödeme Sistemi": request.get("PaymentSystemName", "-"),
+                    "Müşteri Adı": full_name if full_name else "-",
+                    "Kullanıcı Adı": username,
+                    "Oyuncu ID": player_id,
+                    "Miktar (TL)": f"{float(request.get('Amount', 0)):.2f}",
+                    "Talep Tarihi": request.get('RequestTimeLocal', '-')[:16] if request.get('RequestTimeLocal') else '-',
+                    "Bilgi": str(request.get("Info", "-"))[:30] + "..." if len(str(request.get("Info", ""))) > 30 else str(request.get("Info", "-"))
+                })
+        
+        if table_data:
+            # DataFrame oluştur
+            df = pd.DataFrame(table_data)
+            
+            # Veri editörü ile tablo göster
+            edited_df = st.data_editor(
+                df,
+                column_config={
+                    "Seç": st.column_config.CheckboxColumn(
+                        "Seç",
+                        help="Rapor için talepleri seçin",
+                        default=False,
+                    ),
+                    "Index": None,  # Gizle
+                    "Durum": st.column_config.TextColumn(
+                        "Durum",
+                        width="small"
+                    ),
+                    "Ödeme Sistemi": st.column_config.TextColumn(
+                        "Ödeme Sistemi",
+                        width="medium"
+                    ),
+                    "Miktar (TL)": st.column_config.NumberColumn(
+                        "Miktar (TL)",
+                        format="%.2f"
+                    ),
+                    "Talep Tarihi": st.column_config.TextColumn(
+                        "Talep Tarihi",
+                        width="medium"
+                    ),
+                    "Bilgi": st.column_config.TextColumn(
+                        "Bilgi",
+                        width="large"
+                    )
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+        
+
+
+
+            # Tablo seçimini kontrol et - sidebar'da işlem yapmak için
+            selected_for_action = edited_df[edited_df["Seç"] == True]
+            if len(selected_for_action) == 1:
+                # Tek bir talep seçiliyse sidebar'da işlem için hazırla
+                selected_idx = selected_for_action["Index"].iloc[0]
+                st.session_state.selected_request_for_action = filtered_data[selected_idx]
+            elif len(selected_for_action) > 1:
+                # Birden fazla seçim varsa sidebar seçimini temizle
+                if 'selected_request_for_action' in st.session_state:
+                    del st.session_state.selected_request_for_action
+
+            # Seçilen talepler için rapor oluşturma
+            selected_indices = edited_df[edited_df["Seç"]]["Index"].tolist()
+            
+            if selected_indices:
+                st.markdown("---")
+                st.subheader(f"✅ {len(selected_indices)} talep seçildi")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("📄 Çekim Raporu Oluştur", type="primary"):
+                        selected_requests = [filtered_data[i] for i in selected_indices]
+                        
+                        # BankTransferBME taleplerini filtrele
+                        bank_requests = [req for req in selected_requests if req.get("PaymentSystemName") == "BankTransferBME"]
+                        
+                        if bank_requests:
+                            report = create_withdrawal_report(bank_requests)
+                            if report:
+                                st.success("✅ Çekim raporu hazırlandı!")
+                                
+                                # JavaScript tabanlı kopyalama butonu ile raporu göster
+                                st.markdown("### 📄 Çekim Raporu")
+                                create_copy_button(report, "📋 Çekim Raporunu Kopyala", "withdrawal_report")
+                            else:
+                                st.warning("⚠️ Rapor oluşturulamadı - veri eksik olabilir")
+                        else:
+                            st.warning("⚠️ Seçilen talepler arasında BankTransferBME ödeme sistemi bulunamadı")
             
             with col2:
                 if st.button("🚨 Fraud Raporu Oluştur", type="secondary"):
@@ -1823,37 +1816,35 @@ if 'withdrawal_data' in st.session_state and st.session_state.withdrawal_data:
                             st.error("❌ Client ID bulunamadı")
                     else:
                         st.warning("⚠️ Fraud raporu için sadece 1 talep seçin")
-        
-        # İstatistikler
-        st.markdown("---")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            total_amount = sum(float(req.get("Amount", 0)) for req in filtered_data if isinstance(req, dict))
-            st.metric("💰 Toplam Miktar", f"{total_amount:.2f}")
-        
-        with col2:
-            bank_transfer_count = len([req for req in filtered_data 
-                                     if isinstance(req, dict) and req.get("PaymentSystemName") == "BankTransferBME"])
-            st.metric("🏦 BankTransferBME", bank_transfer_count)
-        
-        with col3:
-            unique_users = len(set(req.get("ClientName", req.get("ClientLogin", "")) for req in filtered_data if isinstance(req, dict)))
-            st.metric("👥 Benzersiz Kullanıcı", unique_users)
-        
-        with col4:
-            st.metric("📋 Filtrelenen Talep", len(filtered_data))
-    
+            
+            # İstatistikler
+            st.markdown("---")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                total_amount = sum(float(req.get("Amount", 0)) for req in filtered_data if isinstance(req, dict))
+                st.metric("💰 Toplam Miktar", f"{total_amount:.2f}")
+            
+            with col2:
+                bank_transfer_count = len([req for req in filtered_data 
+                                         if isinstance(req, dict) and req.get("PaymentSystemName") == "BankTransferBME"])
+                st.metric("🏦 BankTransferBME", bank_transfer_count)
+            
+            with col3:
+                unique_users = len(set(req.get("ClientName", req.get("ClientLogin", "")) for req in filtered_data if isinstance(req, dict)))
+                st.metric("👥 Benzersiz Kullanıcı", unique_users)
+            
+            with col4:
+                st.metric("📋 Filtrelenen Talep", len(filtered_data))
+        else:
+            st.warning("⚠️ Seçilen filtrelere uygun talep bulunamadı")
     else:
-        st.warning("⚠️ Seçilen filtrelere uygun talep bulunamadı")
-
-else:
-    # Başlangıç durumu
-    st.info("👋 Çekim taleplerini görüntülemek için sol panelden filtreleri ayarlayın ve 'Talepleri Gör' butonuna basın.")
-    
-    # Yardım bilgileri
-    with st.expander("ℹ️ Kullanım Kılavuzu"):
-        st.markdown("""
+        # Başlangıç durumu
+        st.info("👋 Çekim taleplerini görüntülemek için sol panelden filtreleri ayarlayın ve 'Talepleri Gör' butonuna basın.")
+        
+        # Yardım bilgileri
+        with st.expander("ℹ️ Kullanım Kılavuzu"):
+            st.markdown("""
         ### 📋 Nasıl Kullanılır:
         1. **Tarih Aralığı Seçin**: Sol panelden başlangıç ve bitiş tarihlerini belirleyin
         2. **Durum Filtresi**: İstediğiniz duruma göre talepleri filtreleyin
@@ -1880,6 +1871,11 @@ else:
         """)
 
 with tab2:
+    # Sidebar'ı temizle - bu sekme için geçerli değil
+    st.sidebar.empty()
+    st.sidebar.header("📊 Bahis Raporu")
+    st.sidebar.markdown("Bu sekmede bahis raporları görüntülenir.")
+    
     st.markdown("---")
     st.header("📊 Müşteri Bahis Raporu")
     
@@ -2045,6 +2041,479 @@ st.markdown("*BetConstruct Çekim Talepleri Yönetim Sistemi*")
 
 
 
+# ===== BONUS RAPORU FONKSİYONLARI =====
+
+def format_currency_bonus(amount):
+    """Para birimi formatla (Türk Lirası) - Bonus raporu için"""
+    try:
+        if pd.isna(amount) or amount == "" or amount is None:
+            return "0,00 TL"
+        
+        # Sayıya çevir
+        if isinstance(amount, str):
+            amount = float(amount.replace(',', '.'))
+        
+        # Formatla
+        return f"{amount:,.2f} TL".replace(',', 'X').replace('.', ',').replace('X', '.')
+    except:
+        return '-'
+
+def format_date_for_api_bonus(date_obj):
+    """Tarihi BetConstruct API için formatla (dd-mm-yy - HH:MM:SS)"""
+    try:
+        if isinstance(date_obj, str):
+            date_obj = datetime.strptime(date_obj, '%Y-%m-%d').date()
+        
+        if hasattr(date_obj, 'year'):
+            dt = datetime.combine(date_obj, datetime.min.time())
+        else:
+            dt = date_obj
+        
+        return dt.strftime("%d-%m-%y - %H:%M:%S")
+    except:
+        return '-'
+
+class BonusAPIHandler:
+    def __init__(self, auth_key=None):
+        self.base_url = "https://backofficewebadmin.betconstruct.com/api/tr/Report/GetClientBonusReport"
+        self.auth_key = auth_key or TOKEN
+        self.referer = "https://backoffice.betconstruct.com/"
+        self.origin = "https://backoffice.betconstruct.com"
+    
+    def get_headers(self):
+        """API istekleri için header oluştur"""
+        return {
+            "Authentication": self.auth_key,
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Referer": self.referer,
+            "Origin": self.origin,
+            "X-Requested-With": "XMLHttpRequest"
+        }
+    
+    def build_request_payload(self, filters):
+        """API isteği için payload oluştur"""
+        try:
+            start_date_obj = filters["start_date"]
+            end_date_obj = filters["end_date"]
+            
+            if isinstance(start_date_obj, str):
+                start_date_obj = datetime.strptime(start_date_obj, '%Y-%m-%d').date()
+            start_dt = datetime.combine(start_date_obj, datetime.min.time())
+            
+            if isinstance(end_date_obj, str):
+                end_date_obj = datetime.strptime(end_date_obj, '%Y-%m-%d').date()
+            end_dt = datetime.combine(end_date_obj, datetime.max.time())
+            
+            start_date = start_dt.strftime("%d-%m-%y - %H:%M:%S")
+            end_date = end_dt.strftime("%d-%m-%y - %H:%M:%S")
+            
+            payload = {
+                "ClientBonusId": "",
+                "ClientId": str(filters.get("client_id", "")),
+                "PartnerBonusId": "",
+                "AcceptanceType": None,
+                "BonusType": None,
+                "BonusSource": None,
+                "ByPassTotals": False,
+                "EndDateLocal": None,
+                "IsTest": None,
+                "MaxRows": filters.get("max_rows", 100),
+                "PartnerBonusEndDateLocal": end_date,
+                "PartnerBonusStartDateLocal": start_date,
+                "ResultFromDateLocal": None,
+                "ResultToDateLocal": None,
+                "ResultType": None,
+                "SkeepRows": 0,
+                "SportsbookProfileId": None,
+                "StartDateLocal": None,
+                "ToCurrencyId": "TRY"
+            }
+            
+            return payload
+            
+        except Exception as e:
+            return {"error": f"Payload oluşturma hatası: {str(e)}"}
+    
+    def get_bonus_status(self, acceptance_type):
+        """Bonus durumunu çevir"""
+        status_map = {
+            0: "Beklemede",
+            1: "Onaylandı", 
+            2: "Reddedildi",
+            3: "İptal Edildi"
+        }
+        return status_map.get(acceptance_type, "Bilinmeyen")
+    
+    def fetch_bonus_report(self, filters):
+        """BetConstruct API'den bonus raporu getir"""
+        try:
+            payload = self.build_request_payload(filters)
+            
+            if "error" in payload:
+                return {
+                    "success": False,
+                    "error": payload["error"],
+                    "data": pd.DataFrame()
+                }
+            
+            headers = self.get_headers()
+            
+            with st.spinner("Bonus raporu API'den alınıyor..."):
+                response = requests.post(
+                    self.base_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=30
+                )
+            
+            if response.status_code == 200:
+                data = response.json()
+                df = self.process_api_response(data, filters.get("bonus_types"))
+                return {
+                    "success": True,
+                    "data": df,
+                    "total_records": len(df)
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"HTTP Hatası: {response.status_code}",
+                    "data": pd.DataFrame()
+                }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"API hatası: {str(e)}",
+                "data": pd.DataFrame()
+            }
+    
+    def process_api_response(self, api_data, bonus_types_filter=None):
+        """API yanıtını DataFrame formatına çevir"""
+        try:
+            if isinstance(api_data, dict) and api_data.get('HasError', False):
+                return pd.DataFrame()
+            
+            bonus_list = None
+            
+            if isinstance(api_data, dict) and "Data" in api_data:
+                data_obj = api_data["Data"]
+                if isinstance(data_obj, dict) and "ClientBonusReportData" in data_obj:
+                    bonus_report_data = data_obj["ClientBonusReportData"] 
+                    if isinstance(bonus_report_data, dict) and "Objects" in bonus_report_data:
+                        bonus_list = bonus_report_data["Objects"]
+            
+            if not bonus_list:
+                return pd.DataFrame()
+            
+            processed_data = []
+            
+            for bonus in bonus_list:
+                if isinstance(bonus, dict):
+                    bonus_name = str(bonus.get("Name", ""))
+                    
+                    # Bonus türü filtresi uygula
+                    if bonus_types_filter and len(bonus_types_filter) > 0:
+                        # Seçilen bonus türlerinden herhangi biri ile eşleşiyor mu kontrol et
+                        bonus_match = False
+                        for selected_type in bonus_types_filter:
+                            if bonus_name.strip().upper() == selected_type.upper():
+                                bonus_match = True
+                                break
+                        
+                        # Eşleşme yoksa bu bonusu atla
+                        if not bonus_match:
+                            continue
+                    
+                    processed_data.append({
+                        'Kullanıcı ID': str(bonus.get("ClientId", "")),
+                        'Kullanıcı Adı': str(bonus.get("ClientName", "")),
+                        'Bonus Türü': bonus_name,
+                        'Miktar': float(bonus.get("Amount", 0)),
+                        'Para Birimi': str(bonus.get("ClientCurrency", "TRY")),
+                        'Durum': self.get_bonus_status(bonus.get("AcceptanceType", 0)),
+                        'Tarih': str(bonus.get("AcceptanceDateLocal", ""))
+                    })
+            
+            return pd.DataFrame(processed_data)
+            
+        except Exception as e:
+            return pd.DataFrame()
+
+@st.cache_data(ttl=600)
+def fetch_bonus_data_cached(auth_key, start_date, end_date, client_id, max_rows, bonus_types=None):
+    """Önbellekli bonus veri çekme"""
+    bonus_handler = BonusAPIHandler(auth_key)
+    filters = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "client_id": client_id if client_id else None,
+        "max_rows": max_rows,
+        "bonus_types": bonus_types if bonus_types else None
+    }
+    return bonus_handler.fetch_bonus_report(filters)
+
+def export_bonus_to_excel(df):
+    """Bonus verilerini Excel'e aktar"""
+    from openpyxl.styles import PatternFill, Font, Alignment
+    
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Bonus Raporu", index=False)
+        worksheet = writer.sheets["Bonus Raporu"]
+        
+        # Başlık formatı - Yeşil arka plan
+        header_fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+        header_font = Font(color="FFFFFF", bold=True)
+        
+        # Veri formatı - Açık yeşil zebra desenli
+        light_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+        
+        # Hizalama - Orta
+        center_alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Sütun genişlikleri ve formatlar
+        for col_idx, column in enumerate(worksheet.columns, 1):
+            col_letter = worksheet.cell(row=1, column=col_idx).column_letter
+            worksheet.column_dimensions[col_letter].width = 24
+            
+            # Başlık formatı
+            header_cell = worksheet.cell(row=1, column=col_idx)
+            header_cell.fill = header_fill
+            header_cell.font = header_font
+            header_cell.alignment = center_alignment
+            
+            # Veri hücreleri
+            for row_idx in range(2, worksheet.max_row + 1):
+                cell = worksheet.cell(row=row_idx, column=col_idx)
+                cell.alignment = center_alignment
+                if row_idx % 2 == 0:
+                    cell.fill = light_fill
+        
+        # Filtreleme ekle
+        worksheet.auto_filter.ref = worksheet.dimensions
+        
+    return output.getvalue()
+
+def export_summary_to_excel(df, filename=None):
+    """Özet raporları Excel'e aktarma fonksiyonu - Geliştirilmiş formatla"""
+    try:
+        if df.empty:
+            return None, None
+        
+        # Dosya adı oluştur
+        if not filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"bonus_ozet_raporu_{timestamp}.xlsx"
+        
+        # Bellek buffer oluştur
+        buffer = BytesIO()
+        
+        # Streamlit Cloud için xlsxwriter kullan
+        try:
+            with pd.ExcelWriter(buffer, engine='xlsxwriter', options={'remove_timezone': True}) as writer:
+                # Ana veri sayfası
+                df.to_excel(writer, sheet_name='Ana Veri', index=False)
+                
+                # Workbook ve formatlar
+                workbook = writer.book
+                
+                # Başlık formatı - Koyu yeşil arka plan, beyaz yazı, kalın, ortalanmış
+                header_format = workbook.add_format({
+                    'bold': True,
+                    'text_wrap': True,
+                    'valign': 'vcenter',
+                    'align': 'center',
+                    'fg_color': '#70AD47',
+                    'font_color': 'white',
+                    'border': 1,
+                    'font_size': 12
+                })
+                
+                # Veri formatı - Açık yeşil zebra desenli, ortalanmış
+                data_format_even = workbook.add_format({
+                    'text_wrap': True,
+                    'valign': 'vcenter',
+                    'align': 'center',
+                    'fg_color': '#E2EFDA',
+                    'border': 1,
+                    'font_size': 11
+                })
+                
+                data_format_odd = workbook.add_format({
+                    'text_wrap': True,
+                    'valign': 'vcenter',
+                    'align': 'center',
+                    'fg_color': '#FFFFFF',
+                    'border': 1,
+                    'font_size': 11
+                })
+                
+                # Ana veri sayfası için stil uygula
+                worksheet = writer.sheets['Ana Veri']
+                
+                # Tüm sütunları 24 genişliğinde ayarla
+                for col_num, value in enumerate(df.columns.values):
+                    worksheet.set_column(col_num, col_num, 24)
+                    # Başlık yazma
+                    worksheet.write(0, col_num, value, header_format)
+                
+                # Veri hücrelerini formatla
+                for row_num in range(1, len(df) + 1):
+                    for col_num in range(len(df.columns)):
+                        cell_value = df.iloc[row_num-1, col_num]
+                        # Zebra desen için çift/tek satır kontrolü
+                        if row_num % 2 == 0:
+                            worksheet.write(row_num, col_num, cell_value, data_format_even)
+                        else:
+                            worksheet.write(row_num, col_num, cell_value, data_format_odd)
+                
+                # Auto filter ekleme
+                worksheet.autofilter(0, 0, len(df), len(df.columns) - 1)
+                
+                # Satır yüksekliği ayarla
+                worksheet.set_default_row(25)
+            
+            buffer.seek(0)
+            return buffer.getvalue(), filename
+            
+        except Exception as xlsxwriter_error:
+            # Fallback: openpyxl ile geliştirilmiş format
+            try:
+                from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+                
+                buffer = BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df.to_excel(writer, sheet_name='Ana Veri', index=False)
+                    worksheet = writer.sheets['Ana Veri']
+                    
+                    # Başlık formatı - Koyu yeşil arka plan, beyaz yazı
+                    header_fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+                    header_font = Font(color="FFFFFF", bold=True, size=12)
+                    
+                    # Veri formatı - Açık yeşil zebra desenli
+                    light_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+                    white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+                    data_font = Font(size=11)
+                    
+                    # Kenarlık
+                    thin_border = Border(
+                        left=Side(style='thin'),
+                        right=Side(style='thin'),
+                        top=Side(style='thin'),
+                        bottom=Side(style='thin')
+                    )
+                    
+                    # Orta hizalama
+                    center_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                    
+                    # Sütun genişlikleri ve formatlar
+                    for col_idx, column in enumerate(worksheet.columns, 1):
+                        col_letter = worksheet.cell(row=1, column=col_idx).column_letter
+                        worksheet.column_dimensions[col_letter].width = 24
+                        
+                        # Başlık formatı
+                        header_cell = worksheet.cell(row=1, column=col_idx)
+                        header_cell.fill = header_fill
+                        header_cell.font = header_font
+                        header_cell.alignment = center_alignment
+                        header_cell.border = thin_border
+                        
+                        # Veri hücreleri
+                        for row_idx in range(2, worksheet.max_row + 1):
+                            cell = worksheet.cell(row=row_idx, column=col_idx)
+                            cell.alignment = center_alignment
+                            cell.font = data_font
+                            cell.border = thin_border
+                            # Zebra desen
+                            if row_idx % 2 == 0:
+                                cell.fill = light_fill
+                            else:
+                                cell.fill = white_fill
+                    
+                    # Satır yüksekliği
+                    for row in range(1, worksheet.max_row + 1):
+                        worksheet.row_dimensions[row].height = 25
+                    
+                    # Filtreleme ekle
+                    worksheet.auto_filter.ref = worksheet.dimensions
+                    
+                buffer.seek(0)
+                return buffer.getvalue(), filename
+            except Exception as openpyxl_error:
+                return None, None
+        
+    except Exception as e:
+        return None, None
+
+def create_bonus_summary_report(df):
+    """Kullanıcı bazlı bonus özet raporu oluştur"""
+    try:
+        if df.empty:
+            return pd.DataFrame()
+        
+        if 'Kullanıcı ID' not in df.columns or 'Bonus Türü' not in df.columns or 'Miktar' not in df.columns:
+            return pd.DataFrame()
+        
+        # Kullanıcı ve bonus türü bazlı gruplama
+        user_bonus_summary = df.groupby(['Kullanıcı ID', 'Kullanıcı Adı', 'Bonus Türü']).agg({
+            'Miktar': ['count', 'sum']
+        }).reset_index()
+        
+        # MultiIndex sütunları düzelt
+        user_bonus_summary.columns = ['Kullanıcı ID', 'Kullanıcı Adı', 'Bonus Türü', 'Kaç Defa Aldı', 'Toplam Miktar']
+        
+        # Miktarları formatla
+        user_bonus_summary['Toplam Miktar Formatted'] = user_bonus_summary['Toplam Miktar'].apply(lambda x: format_currency_bonus(x))
+        
+        # Sıralama
+        user_bonus_summary = user_bonus_summary.sort_values(['Toplam Miktar', 'Kullanıcı ID'], ascending=[False, True])
+        
+        # Görüntüleme için sütun sırası
+        display_columns = ['Kullanıcı ID', 'Kullanıcı Adı', 'Bonus Türü', 'Kaç Defa Aldı', 'Toplam Miktar Formatted']
+        user_bonus_summary_display = user_bonus_summary[display_columns].copy()
+        user_bonus_summary_display.columns = ['Kullanıcı ID', 'Kullanıcı Adı', 'Bonus Türü', 'Kaç Defa Aldı', 'Toplam Miktar']
+        
+        return user_bonus_summary_display
+    
+    except Exception as e:
+        return pd.DataFrame()
+
+def format_currency_bonus(amount):
+    """Bonus miktar formatı"""
+    try:
+        return f"{amount:,.2f} TL"
+    except:
+        return "0.00 TL"
+
+def create_bonus_type_summary(df):
+    """Bonus türü bazlı özet rapor oluştur"""
+    try:
+        if df.empty:
+            return pd.DataFrame()
+        
+        if 'Bonus Türü' not in df.columns:
+            return pd.DataFrame()
+        
+        summary = df.groupby('Bonus Türü').agg({
+            'Kullanıcı ID': 'count',
+            'Miktar': ['sum', 'mean']
+        }).reset_index()
+        
+        # MultiIndex sütunları düzelt
+        summary.columns = ['Bonus Türü', 'Adet', 'Toplam Miktar', 'Ortalama Miktar']
+        
+        # Formatla
+        summary['Toplam Miktar'] = summary['Toplam Miktar'].apply(lambda x: format_currency_bonus(x))
+        summary['Ortalama Miktar'] = summary['Ortalama Miktar'].apply(lambda x: format_currency_bonus(x))
+        
+        return summary
+    
+    except Exception as e:
+        return pd.DataFrame()
+
 # ===== PERFORMANS ANALİZİ FONKSİYONLARI =====
 
 def get_status_display_performance(state, allow_user, reject_user):
@@ -2100,8 +2569,8 @@ def process_data_for_performance(raw_data):
     df["ClientNameFormatted"] = df["ClientName"].apply(fix_name)
 
     # Onaylayan kullanıcı
-    df["Approver"] = df["AllowUserName"].fillna(df["RejectUserName"])
-    df["Approver"] = df["Approver"].fillna("–")
+    df["Personel"] = df["AllowUserName"].fillna(df["RejectUserName"])
+    df["Personel"] = df["Personel"].fillna("–")
 
     # Bilgi kısaltma
     def extract_info(info):
@@ -2138,9 +2607,9 @@ def calculate_performance(df):
     # Sadece işlem görmüşler (ödenmiş veya reddedilmiş)
     processed = df.dropna(subset=["AllowUserName", "RejectUserName"], how="all")
     if processed.empty:
-        return pd.DataFrame(columns=["Approver", "İşlemAdedi", "OrtalamaSüre"])
+        return pd.DataFrame(columns=["Personel", "İşlemAdedi", "OrtalamaSüre"])
 
-    perf = processed.groupby("Approver").agg(
+    perf = processed.groupby("Personel").agg(
         İşlemAdedi=("Id", "count"),
         OrtalamaSüre=("ProcessingTimeMin", "mean")
     ).round(2).reset_index()
@@ -2148,11 +2617,73 @@ def calculate_performance(df):
 
 def export_to_excel_performance(main_df, perf_df):
     """Performans analizi için Excel'e aktar"""
+    from openpyxl.styles import PatternFill, Font, Alignment
+    from openpyxl.utils.dataframe import dataframe_to_rows
+    
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        # Ana işlemler sayfası
         main_df.to_excel(writer, sheet_name="İşlemler", index=False)
+        worksheet1 = writer.sheets["İşlemler"]
+        
+        # Başlık formatı - Mavi arka plan
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        header_font = Font(color="FFFFFF", bold=True)
+        
+        # Veri formatı - Açık gri zebra desenli
+        light_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+        
+        # Hizalama - Orta
+        center_alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Sütun genişliklerini 24 yap ve formatla
+        for col_idx, column in enumerate(worksheet1.columns, 1):
+            col_letter = worksheet1.cell(row=1, column=col_idx).column_letter
+            worksheet1.column_dimensions[col_letter].width = 24
+            
+            # Başlık formatı
+            header_cell = worksheet1.cell(row=1, column=col_idx)
+            header_cell.fill = header_fill
+            header_cell.font = header_font
+            header_cell.alignment = center_alignment
+            
+            # Veri hücrelerini formatla
+            for row_idx in range(2, worksheet1.max_row + 1):
+                cell = worksheet1.cell(row=row_idx, column=col_idx)
+                cell.alignment = center_alignment
+                # Zebra desen
+                if row_idx % 2 == 0:
+                    cell.fill = light_fill
+        
+        # Filtreleme ekle
+        worksheet1.auto_filter.ref = worksheet1.dimensions
+        
+        # Performans sayfası
         if not perf_df.empty:
-            perf_df.to_excel(writer, sheet_name="Performans", index=False)  
+            perf_df.to_excel(writer, sheet_name="Performans", index=False)
+            worksheet2 = writer.sheets["Performans"]
+            
+            # Performans sayfası için aynı formatı uygula
+            for col_idx, column in enumerate(worksheet2.columns, 1):
+                col_letter = worksheet2.cell(row=1, column=col_idx).column_letter
+                worksheet2.column_dimensions[col_letter].width = 24
+                
+                # Başlık formatı
+                header_cell = worksheet2.cell(row=1, column=col_idx)
+                header_cell.fill = header_fill
+                header_cell.font = header_font
+                header_cell.alignment = center_alignment
+                
+                # Veri hücrelerini formatla
+                for row_idx in range(2, worksheet2.max_row + 1):
+                    cell = worksheet2.cell(row=row_idx, column=col_idx)
+                    cell.alignment = center_alignment
+                    if row_idx % 2 == 0:
+                        cell.fill = light_fill
+            
+            # Filtreleme ekle
+            worksheet2.auto_filter.ref = worksheet2.dimensions
+            
     return output.getvalue()
 
 @st.cache_data(ttl=600)  # 10 dakika önbellek
@@ -2200,6 +2731,11 @@ def fetch_withdrawal_requests_for_performance(token):
 
 # TAB 3 - PERFORMANS ANALİZİ
 with tab3:
+    # Sidebar'ı temizle - bu sekme için geçerli değil
+    st.sidebar.empty()
+    st.sidebar.header("📈 Performans Analizi")
+    st.sidebar.markdown("Bu sekmede performans analizleri görüntülenir.")
+    
     st.header("📈 Performans Analizi")
     
     # Bugünün tarihi olarak varsayılan filtre
@@ -2241,13 +2777,13 @@ with tab3:
         # Grafikler
         col1, col2 = st.columns(2)
         with col1:
-            fig1 = px.bar(perf_df, x="Approver", y="İşlemAdedi", title="İşlem Adedi", color="İşlemAdedi")
+            fig1 = px.bar(perf_df, x="Personel", y="İşlemAdedi", title="İşlem Adedi", color="İşlemAdedi")
             st.plotly_chart(fig1, use_container_width=True)
         with col2:
-            fig2 = px.pie(perf_df, names="Approver", values="İşlemAdedi", title="İşlem Dağılımı")
+            fig2 = px.pie(perf_df, names="Personel", values="İşlemAdedi", title="İşlem Dağılımı")
             st.plotly_chart(fig2, use_container_width=True)
 
-        fig3 = px.bar(perf_df, x="Approver", y="OrtalamaSüre", title="Ortalama Süre (dakika)", color="OrtalamaSüre")
+        fig3 = px.bar(perf_df, x="Personel", y="OrtalamaSüre", title="Ortalama Süre (dakika)", color="OrtalamaSüre")
         st.plotly_chart(fig3, use_container_width=True)
 
         # Performans tablosu
@@ -2258,10 +2794,10 @@ with tab3:
         excel_data = export_to_excel_performance(
             filtered_df[[
                 "StatusDisplay", "PaymentSystemName", "ClientNameFormatted", "ClientId",
-                "Amount", "Approver", "InfoShort", "ProcessingTimeMin"
+                "Amount", "Personel", "InfoShort", "ProcessingTimeMin"
             ]].rename(columns={
                 "StatusDisplay": "Durum", "PaymentSystemName": "Ödeme Sistemi", "ClientNameFormatted": "Müşteri Adı",
-                "ClientId": "Oyuncu ID", "Amount": "Miktar", "Approver": "Onaylayan",
+                "ClientId": "Oyuncu ID", "Amount": "Miktar", "Personel": "Personel",
                 "InfoShort": "Bilgi", "ProcessingTimeMin": "Süre (dk)"
             }),
             perf_df
@@ -2272,3 +2808,213 @@ with tab3:
             file_name=f"Performans_Raporu_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
+# TAB 4 - BONUS RAPORU
+with tab4:
+    # Sidebar'ı temizle - bu sekme için geçerli değil
+    st.sidebar.empty()
+    st.sidebar.header("🏆 Bonus Raporu")
+    st.sidebar.markdown("Bu sekmede bonus raporları görüntülenir.")
+    
+    st.header("🏆 Bonus Raporu")
+    
+    # Dünün tarihi olarak varsayılan filtre
+    yesterday = datetime.now().date() - timedelta(days=1)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        bonus_start_date = st.date_input("Başlangıç Tarihi", value=yesterday, key="bonus_start_date")
+    with col2:
+        bonus_end_date = st.date_input("Bitiş Tarihi", value=yesterday, key="bonus_end_date")
+
+    # Bonus türü filtresi
+    bonus_types = [
+        "CASİNO KAYIP BONUSU", "%100 SLOT BONUSU", "%100 CASİNO HOŞGELDİN BONUSU",
+        "%100 PRAGMATİC SALI - PERŞEMBE", "%100 SPOR HOŞGELDİN BONUSU",
+        "%25 SPOR YATIRIM BONUSU", "%5 CASİNO HAFTALIK", "%5 SPOR HAFTALIK",
+        "250 TL CASİNO DENEME BONUSU", "250 TL DOĞUM GÜNÜ CASİNO BONUSU",
+        "250 TL SPOR DENEME BONUSU", "CASİNO BAĞLILIK BONUSU", "CASİNO CALL DAVET",
+        "CASİNO ÇEVRİMSİZ BONUS", "CASİNO DOĞUM GÜNÜ BONUSU", "%10 ÇEVRİMSİZ SPOR BONUSU",
+        "P.TESİ & ÇARŞAMBA %100 GÜNÜN İLK KAYIBINA", "SPOR BAĞLILIK BONUSU",
+        "SPOR CALL DAVET", "SPOR ÇEVRİMSİZ BONUS", "SPOR DOĞUM GÜNÜ BONUSU",
+        "SPOR KAYIP BONUSU", "YENİ CASİNO ŞANS BONUSU"
+    ]
+    
+    selected_bonus_types = st.multiselect(
+        "Bonus Türleri (Birden fazla seçebilirsiniz):",
+        bonus_types,
+        help="Boş bırakırsanız tüm bonus türleri getirilir",
+        key="bonus_types_filter"
+    )
+
+    # Diğer filtreler
+    col3, col4 = st.columns(2)
+    with col3:
+        bonus_client_id = st.text_input("Kullanıcı ID (isteğe bağlı):", key="bonus_client_id")
+    with col4:
+        bonus_max_rows = st.number_input("Maksimum Kayıt:", min_value=1, max_value=10000, value=1000, key="bonus_max_rows")
+
+    # Token kontrolü
+    if not TOKEN.strip():
+        st.warning("Lütfen ayarlardan bir API token girin.")
+        st.stop()
+
+    # Veri getir butonu
+    if st.button("🔍 Bonus Raporunu Getir", type="primary"):
+        if bonus_start_date > bonus_end_date:
+            st.error("Başlangıç tarihi bitiş tarihinden sonra olamaz!")
+        else:
+            try:
+                result = fetch_bonus_data_cached(
+                    TOKEN.strip(),
+                    bonus_start_date,
+                    bonus_end_date,
+                    bonus_client_id.strip() if bonus_client_id else None,
+                    bonus_max_rows,
+                    selected_bonus_types if selected_bonus_types else None
+                )
+                
+                if result["success"]:
+                    st.session_state.bonus_data = result["data"]
+                    st.success(f"✅ {result['total_records']} bonus kaydı getirildi!")
+                else:
+                    st.error(f"❌ {result['error']}")
+                    st.session_state.bonus_data = pd.DataFrame()
+                    
+            except Exception as e:
+                st.error(f"❌ Beklenmeyen hata: {str(e)}")
+                st.session_state.bonus_data = pd.DataFrame()
+
+    # Sonuçları göster
+    if 'bonus_data' in st.session_state and not st.session_state.bonus_data.empty:
+        st.subheader("📋 Bonus Raporu Sonuçları")
+        
+        # Veri tablosu
+        st.dataframe(st.session_state.bonus_data, use_container_width=True, height=400)
+        
+        # Özet bilgiler
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.info(f"📊 Toplam kayıt: {len(st.session_state.bonus_data)}")
+        
+        with col2:
+            if 'Miktar' in st.session_state.bonus_data.columns:
+                total_amount = st.session_state.bonus_data['Miktar'].sum()
+                st.info(f"💰 Toplam miktar: {format_currency_bonus(total_amount)}")
+        
+        with col3:
+            if 'Kullanıcı ID' in st.session_state.bonus_data.columns:
+                unique_users = st.session_state.bonus_data['Kullanıcı ID'].nunique()
+                st.info(f"👤 Benzersiz kullanıcı: {unique_users}")
+        
+        # Bonus türlerine göre dağılım
+        if 'Bonus Türü' in st.session_state.bonus_data.columns:
+            st.subheader("📈 Bonus Türü Dağılımı")
+            bonus_counts = st.session_state.bonus_data['Bonus Türü'].value_counts()
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                fig_bar = px.bar(
+                    x=bonus_counts.index,
+                    y=bonus_counts.values,
+                    title="Bonus Türü Adedi",
+                    labels={'x': 'Bonus Türü', 'y': 'Adet'}
+                )
+                fig_bar.update_xaxes(tickangle=45)
+                st.plotly_chart(fig_bar, use_container_width=True)
+            
+            with col2:
+                fig_pie = px.pie(
+                    values=bonus_counts.values,
+                    names=bonus_counts.index,
+                    title="Bonus Türü Oranı"
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
+        
+        # İşlem butonları
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Excel export butonu
+            excel_data = export_bonus_to_excel(st.session_state.bonus_data)
+            st.download_button(
+                label="📥 Excel'e Aktar",
+                data=excel_data,
+                file_name=f"Bonus_Raporu_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        
+        with col2:
+            # Özet rapor butonu
+            if st.button("📈 Özet Rapor Oluştur"):
+                # Kullanıcı bazlı özet rapor
+                user_summary = create_bonus_summary_report(st.session_state.bonus_data)
+                
+                if not user_summary.empty:
+                    st.subheader("👥 Kullanıcı Bazlı Özet")
+                    st.dataframe(user_summary, use_container_width=True, hide_index=True)
+                    
+                    # Kullanıcı özet raporu Excel indirme
+                    try:
+                        excel_data = export_summary_to_excel(user_summary, f"kullanici_ozet_{bonus_start_date.strftime('%Y%m%d')}_{bonus_end_date.strftime('%Y%m%d')}.xlsx")
+                        if excel_data[0] and excel_data[1]:
+                            st.download_button(
+                                label="📥 Kullanıcı Özet Raporunu İndir",
+                                data=excel_data[0],
+                                file_name=excel_data[1],
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True,
+                                key="user_summary_download"
+                            )
+                        else:
+                            st.error("Kullanıcı özet rapor dosyası oluşturulamadı.")
+                    except Exception as e:
+                        st.error(f"Kullanıcı özet rapor indirme hatası: {str(e)}")
+                    
+                    st.divider()
+                    
+                    # Bonus türü bazlı özet
+                    bonus_type_summary = create_bonus_type_summary(st.session_state.bonus_data)
+                    if not bonus_type_summary.empty:
+                        st.subheader("🎁 Bonus Türü Bazlı Özet")
+                        st.dataframe(bonus_type_summary, use_container_width=True, hide_index=True)
+                        
+                        # Bonus türü özet raporu Excel indirme
+                        try:
+                            excel_data = export_summary_to_excel(bonus_type_summary, f"bonus_turu_ozet_{bonus_start_date.strftime('%Y%m%d')}_{bonus_end_date.strftime('%Y%m%d')}.xlsx")
+                            if excel_data[0] and excel_data[1]:
+                                st.download_button(
+                                    label="📥 Bonus Türü Özet Raporunu İndir",
+                                    data=excel_data[0],
+                                    file_name=excel_data[1],
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True,
+                                    key="bonus_type_summary_download"
+                                )
+                            else:
+                                st.error("Bonus türü özet rapor dosyası oluşturulamadı.")
+                        except Exception as e:
+                            st.error(f"Bonus türü özet rapor indirme hatası: {str(e)}")
+                    
+                else:
+                    st.warning("Özet rapor oluşturulamadı.")
+        
+        with col3:
+            # Temizle butonu
+            if st.button("🗑️ Sonuçları Temizle"):
+                st.session_state.bonus_data = pd.DataFrame()
+                st.success("Sonuçlar temizlendi!")
+                st.rerun()
+    
+    elif 'bonus_data' in st.session_state and st.session_state.bonus_data.empty:
+        st.info("📝 Bonus raporu getirmek için yukarıdaki butona tıklayın.")
+    else:
+        # Session state'i başlat
+        if 'bonus_data' not in st.session_state:
+            st.session_state.bonus_data = pd.DataFrame()
+        st.info("📝 Bonus raporu getirmek için yukarıdaki butona tıklayın.")
+
+# Footer
+st.markdown("---")
+st.markdown("*BetConstruct Çekim Talepleri Yönetimi v2.0*")
