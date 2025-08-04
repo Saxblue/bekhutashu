@@ -7,10 +7,13 @@ from datetime import datetime, timedelta
 import os
 import pytz
 import time
+import plotly.express as px
+import plotly.graph_objects as go
+from io import BytesIO
 
 # Sayfa konfigürasyonu
 st.set_page_config(
-    page_title="BetConstruct Çekim Talepleri Yönetimi",
+    page_title="BetConstruct Rapor",
     page_icon="💰",
     layout="wide"
 )
@@ -1073,7 +1076,7 @@ def create_fraud_report(withdrawal_request, client_id):
                             try:
                                 login_time = datetime.strptime(login["StartTime"].split('+')[0], '%Y-%m-%dT%H:%M:%S')
                             except Exception as e:
-                                st.error(f"Error parsing login time '{login["StartTime"]}': {str(e)}")
+                                st.error(f"Error parsing login time '{login['StartTime']}': {str(e)}")
                                 continue
                         
                         if login_time >= thirty_days_ago:
@@ -1193,7 +1196,7 @@ def create_fraud_report(withdrawal_request, client_id):
                         try:
                             login_time = datetime.strptime(login["StartTime"].split('+')[0], '%Y-%m-%dT%H:%M:%S')
                         except Exception as e:
-                            st.error(f"Error parsing login time '{login["StartTime"]}': {str(e)}")
+                            st.error(f"Error parsing login time '{login['StartTime']}': {str(e)}")
                             continue
                     login_times.append(login_time)
                 
@@ -1392,7 +1395,7 @@ def sort_requests_by_status_and_date(requests):
 # Streamlit UI
 col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
 with col1:
-    st.title("💰 BetConstruct Çekim Talepleri Yönetimi")
+    st.title("💰 BetConstruct Rapor")
 with col2:
     # Seçilen talep bilgisi
     if 'selected_request_for_action' in st.session_state:
@@ -1450,7 +1453,7 @@ if st.session_state.get('show_settings', False):
                 st.rerun()
 
 # Tab sistemi ekle
-tab1, tab2 = st.tabs(["💰 Çekim Talepleri", "📊 Bahis Raporu"])
+tab1, tab2, tab3 = st.tabs(["💰 Çekim Talepleri", "📊 Bahis Raporu", "📈 Performans Analizi"])
 
 with tab1:
     st.markdown("---")
@@ -2040,3 +2043,232 @@ st.markdown("---")
 st.markdown("*BetConstruct Çekim Talepleri Yönetim Sistemi*")
 
 
+
+
+# ===== PERFORMANS ANALİZİ FONKSİYONLARI =====
+
+def get_status_display_performance(state, allow_user, reject_user):
+    """Durum gösterimi için güvenilir fonksiyon"""
+    if pd.isna(state):
+        return "❓ Bilinmiyor"
+    state = int(state)
+
+    # AllowUserName dolu → Ödendi
+    if pd.notna(allow_user) and str(allow_user).strip() not in ["", "None", "null"]:
+        return "✅ Ödendi"
+
+    # RejectUserName dolu → Reddedildi  
+    if pd.notna(reject_user) and str(reject_user).strip() not in ["", "None", "null"]:
+        return "❌ Reddedildi"
+
+    # State göre
+    if state == 5:
+        return "🔄 İptal Edildi"
+    elif state == -1:
+        return "🟠 İptal Beklemede"
+    elif state in [2, -2]:
+        return "⏳ Beklemede"
+    else:
+        return f"🔵 Bilinmeyen ({state})"
+
+def process_data_for_performance(raw_data):
+    """Performans analizi için veri işleme"""
+    df = pd.DataFrame(raw_data)
+
+    # Zorunlu sütunlar
+    cols = [
+        "Id", "State", "StateName", "PaymentSystemName", "ClientId", "ClientName",
+        "Amount", "AllowUserName", "RejectUserName", "Info", "RequestTimeLocal", "AllowTimeLocal"
+    ]
+    for col in cols:
+        if col not in df.columns:
+            df[col] = None
+
+    # Zaman formatı
+    df["RequestTimeLocal"] = pd.to_datetime(df["RequestTimeLocal"], errors="coerce")
+    df["AllowTimeLocal"] = pd.to_datetime(df["AllowTimeLocal"], errors="coerce")
+
+    # Müşteri adı düzeltme: "Soyad Ad" → "Ad Soyad"
+    def fix_name(name):
+        if pd.isna(name) or not isinstance(name, str):
+            return "Bilinmiyor"
+        parts = name.strip().split()
+        if len(parts) > 1:
+            return " ".join(parts[1:] + [parts[0]])  # Ad Soyad
+        return name.strip()
+
+    df["ClientNameFormatted"] = df["ClientName"].apply(fix_name)
+
+    # Onaylayan kullanıcı
+    df["Approver"] = df["AllowUserName"].fillna(df["RejectUserName"])
+    df["Approver"] = df["Approver"].fillna("–")
+
+    # Bilgi kısaltma
+    def extract_info(info):
+        if pd.isna(info) or not isinstance(info, str):
+            return "–"
+        if "IBAN:" in info:
+            return info.split("IBAN:")[1].split(",")[0][:26] + "..."
+        elif "AccountNumber:" in info:
+            return info.split("AccountNumber:")[1].split(",")[0][:26] + "..."
+        elif "fullname:" in info:
+            return info.split("fullname:")[1].split(",")[0][:26] + "..."
+        return info[:30] + "..."
+
+    df["InfoShort"] = df["Info"].apply(extract_info)
+
+    # İşlem süresi (dakika)
+    df["ProcessingTimeSec"] = (df["AllowTimeLocal"] - df["RequestTimeLocal"]).dt.total_seconds()
+    df["ProcessingTimeMin"] = (df["ProcessingTimeSec"] / 60).round(2)
+    df["ProcessingTimeMin"] = df["ProcessingTimeMin"].fillna(0)
+
+    # Durum hesaplama
+    df["StatusDisplay"] = df.apply(
+        lambda row: get_status_display_performance(row["State"], row["AllowUserName"], row["RejectUserName"]),
+        axis=1
+    )
+
+    # En yeni işlemler en üstte olacak şekilde sırala
+    df = df.sort_values("RequestTimeLocal", ascending=False, na_position='last')
+
+    return df
+
+def calculate_performance(df):
+    """Personel performansını hesapla"""
+    # Sadece işlem görmüşler (ödenmiş veya reddedilmiş)
+    processed = df.dropna(subset=["AllowUserName", "RejectUserName"], how="all")
+    if processed.empty:
+        return pd.DataFrame(columns=["Approver", "İşlemAdedi", "OrtalamaSüre"])
+
+    perf = processed.groupby("Approver").agg(
+        İşlemAdedi=("Id", "count"),
+        OrtalamaSüre=("ProcessingTimeMin", "mean")
+    ).round(2).reset_index()
+    return perf
+
+def export_to_excel_performance(main_df, perf_df):
+    """Performans analizi için Excel'e aktar"""
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        main_df.to_excel(writer, sheet_name="İşlemler", index=False)
+        if not perf_df.empty:
+            perf_df.to_excel(writer, sheet_name="Performans", index=False)  
+    return output.getvalue()
+
+@st.cache_data(ttl=600)  # 10 dakika önbellek
+def fetch_withdrawal_requests_for_performance(token):
+    """Performans analizi için çekim taleplerini API'den getir"""
+    headers = {
+        "Content-Type": "application/json;charset=UTF-8",
+        "Authentication": token,
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://backoffice.betconstruct.com",  
+        "Referer": "https://backoffice.betconstruct.com/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    payload = {
+        "PageIndex": 1,
+        "PageSize": 500,
+        "Sort": {"Field": "Id", "Dir": "desc"},
+        "DateFrom": None,
+        "DateTo": None,
+        "Statuses": [],
+        "PaymentProviderId": None,
+        "SearchText": "",
+        "WithdrawId": None
+    }
+
+    try:
+        with st.spinner("API'den veri alınıyor..."):
+            response = requests.post(API_URL, json=payload, headers=headers, timeout=30)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("HasError"):
+                    st.error(f"API Hatası: {data.get('AlertMessage', 'Bilinmeyen hata')}")
+                    return None
+                if "Data" in data and "ClientRequests" in data["Data"]:
+                    return data["Data"]["ClientRequests"]
+                else:
+                    st.error("API yanıtında beklenen veri yapısı bulunamadı.")
+                    return None
+            else:
+                st.error(f"HTTP Hatası: {response.status_code} - {response.text}")
+                return None
+    except Exception as e:
+        st.error(f"Bağlantı hatası: {str(e)}")
+        return None
+
+# TAB 3 - PERFORMANS ANALİZİ
+with tab3:
+    st.header("📈 Performans Analizi")
+    
+    # Bugünün tarihi olarak varsayılan filtre
+    today = datetime.now().date()
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        date_from = st.date_input("Başlangıç Tarihi", value=today, key="perf_date_from")
+    with col2:
+        date_to = st.date_input("Bitiş Tarihi", value=today, key="perf_date_to")
+
+    # Token kontrolü
+    if not TOKEN.strip():
+        st.warning("Lütfen ayarlardan bir API token girin.")
+        st.stop()
+
+    # Veri çek (istemci taraflı filtreleme için tüm veriler)
+    raw_data = fetch_withdrawal_requests_for_performance(TOKEN.strip())
+    if raw_data is None or len(raw_data) == 0:
+        st.error("Veri alınamadı. Token veya ağ bağlantınızı kontrol edin.")
+        st.stop()
+
+    # Veriyi işle
+    df = process_data_for_performance(raw_data)
+    
+    # İstemci taraflı tarih filtresi uygula
+    if date_from and date_to:
+        mask = (df["RequestTimeLocal"].dt.date >= date_from) & (df["RequestTimeLocal"].dt.date <= date_to)
+        filtered_df = df[mask].copy()
+    else:
+        filtered_df = df.copy()
+
+    # Performans hesapla
+    perf_df = calculate_performance(filtered_df)
+
+    if perf_df.empty:
+        st.warning("Seçilen tarih aralığında performans verisi bulunamadı.")
+    else:
+        # Grafikler
+        col1, col2 = st.columns(2)
+        with col1:
+            fig1 = px.bar(perf_df, x="Approver", y="İşlemAdedi", title="İşlem Adedi", color="İşlemAdedi")
+            st.plotly_chart(fig1, use_container_width=True)
+        with col2:
+            fig2 = px.pie(perf_df, names="Approver", values="İşlemAdedi", title="İşlem Dağılımı")
+            st.plotly_chart(fig2, use_container_width=True)
+
+        fig3 = px.bar(perf_df, x="Approver", y="OrtalamaSüre", title="Ortalama Süre (dakika)", color="OrtalamaSüre")
+        st.plotly_chart(fig3, use_container_width=True)
+
+        # Performans tablosu
+        st.subheader("Personel Performansı")
+        st.dataframe(perf_df, use_container_width=True, hide_index=True)
+
+        # Excel aktar butonu
+        excel_data = export_to_excel_performance(
+            filtered_df[[
+                "StatusDisplay", "PaymentSystemName", "ClientNameFormatted", "ClientId",
+                "Amount", "Approver", "InfoShort", "ProcessingTimeMin"
+            ]].rename(columns={
+                "StatusDisplay": "Durum", "PaymentSystemName": "Ödeme Sistemi", "ClientNameFormatted": "Müşteri Adı",
+                "ClientId": "Oyuncu ID", "Amount": "Miktar", "Approver": "Onaylayan",
+                "InfoShort": "Bilgi", "ProcessingTimeMin": "Süre (dk)"
+            }),
+            perf_df
+        )
+        st.download_button(
+            label="📥 Excel'e Aktar",
+            data=excel_data,
+            file_name=f"Performans_Raporu_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
