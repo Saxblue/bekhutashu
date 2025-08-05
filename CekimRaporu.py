@@ -13,7 +13,7 @@ from io import BytesIO
 
 # Sayfa konfigürasyonu
 st.set_page_config(
-    page_title="BetConstruct Çekim Talepleri Yönetimi",
+    page_title="BetConstruct Raporlama Sistemi",
     page_icon="💰",
     layout="wide"
 )
@@ -3018,3 +3018,4 @@ with tab4:
 # Footer
 st.markdown("---")
 st.markdown("*BetConstruct Çekim Talepleri Yönetimi v2.0*")
+
