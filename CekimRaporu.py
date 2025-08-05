@@ -3017,5 +3017,6 @@ with tab4:
 
 # Footer
 st.markdown("---")
-st.markdown("*BetConstruct Çekim Talepleri Yönetimi v2.0*")
+st.markdown("*BetConstruct Raporlama Sistemi v2.0*")
+
 
