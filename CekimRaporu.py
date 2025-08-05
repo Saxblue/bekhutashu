@@ -1395,7 +1395,7 @@ def sort_requests_by_status_and_date(requests):
 # Streamlit UI
 col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
 with col1:
-    st.title("💰 BetConstruct Çekim Talepleri Yönetimi")
+    st.title("💰 BetConstruct Raporlama Sistemi")
 with col2:
     # Seçilen talep bilgisi
     if 'selected_request_for_action' in st.session_state:
@@ -3018,6 +3018,7 @@ with tab4:
 # Footer
 st.markdown("---")
 st.markdown("*BetConstruct Raporlama Sistemi v2.0*")
+
 
 
 
