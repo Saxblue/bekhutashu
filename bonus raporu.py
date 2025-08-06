@@ -54,7 +54,7 @@ class SettingsWindow(tk.Toplevel):
     
     def load_settings(self):
         default_settings = {
-            "auth_key": "5bb38a3120522e0c9342c9253343989e2e7a40bf551d819c0bc16cb21348928e",
+            "auth_key": "0c5e573a9bfe5655084a747aaff9f462400f1e8d5766733bfc6e60b8dadeefb9",
             "referer": "https://backoffice.betconstruct.com/",
             "origin": "https://backoffice.betconstruct.com",
             "authenticated": False
@@ -764,4 +764,5 @@ class BonusReportApp:
             pass
 
 if __name__ == "__main__":
+
     app = BonusReportApp()
