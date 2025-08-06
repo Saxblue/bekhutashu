@@ -1,0 +1,38 @@
+[
+  {
+    "name": "ADEM",
+    "department": "Finans",
+    "annual_leave": 0,
+    "excuse_leave": 0
+  },
+  {
+    "name": "GÜNEŞ",
+    "department": "Finans",
+    "annual_leave": 0,
+    "excuse_leave": 0
+  },
+  {
+    "name": "YEŞİM",
+    "department": "Çağrı Merkezi",
+    "annual_leave": 0,
+    "excuse_leave": 0
+  },
+  {
+    "name": "SELİM",
+    "department": "Finans Yetkili",
+    "annual_leave": 0,
+    "excuse_leave": 0
+  },
+  {
+    "name": "EGE",
+    "department": "Finans",
+    "annual_leave": 0,
+    "excuse_leave": 0
+  },
+  {
+    "name": "ZİYA",
+    "department": "Finans",
+    "annual_leave": 0,
+    "excuse_leave": 0
+  }
+]
