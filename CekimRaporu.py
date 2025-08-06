@@ -3,13 +3,17 @@ import streamlit.components.v1 as components
 import requests
 import json
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import os
 import pytz
 import time
 import plotly.express as px
 import plotly.graph_objects as go
 from io import BytesIO
+from typing import List, Dict, Optional, Tuple, Any
+from enum import Enum
+import json
+from pathlib import Path
 
 # Sayfa konfigürasyonu
 st.set_page_config(
@@ -18,94 +22,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Sağ üst köşeye yeşil nokta butonu ekle
-st.markdown("""
-<style>
-.green-dot-container {
-    position: fixed;
-    top: 60px;
-    right: 20px;
-    z-index: 999;
-}
-
-.green-dot {
-    width: 12px;
-    height: 12px;
-    background-color: #28a745;
-    border-radius: 50%;
-    cursor: pointer;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    transition: all 0.3s ease;
-    animation: pulse-green 2s infinite;
-}
-
-.green-dot:hover {
-    background-color: #1e7e34;
-    transform: scale(1.2);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-}
-
-@keyframes pulse-green {
-    0% {
-        box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7);
-    }
-    70% {
-        box-shadow: 0 0 0 10px rgba(40, 167, 69, 0);
-    }
-    100% {
-        box-shadow: 0 0 0 0 rgba(40, 167, 69, 0);
-    }
-}
-
-.tooltip {
-    position: relative;
-    display: inline-block;
-}
-
-.tooltip .tooltiptext {
-    visibility: hidden;
-    width: 120px;
-    background-color: #333;
-    color: white;
-    text-align: center;
-    border-radius: 6px;
-    padding: 5px;
-    position: absolute;
-    z-index: 1;
-    bottom: 125%;
-    left: 50%;
-    margin-left: -60px;
-    opacity: 0;
-    transition: opacity 0.3s;
-    font-size: 12px;
-}
-
-.tooltip:hover .tooltiptext {
-    visibility: visible;
-    opacity: 1;
-}
-</style>
-
-<div class="green-dot-container">
-    <div class="tooltip">
-        <a href="https://bonusraporu.streamlit.app/" target="_blank" style="text-decoration: none;">
-            <div class="green-dot"></div>
-        </a>
-        <span class="tooltiptext">Bonus Raporu</span>
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-# Alternatif çözüm: Streamlit sidebar'da link butonu
-with st.sidebar:
-    st.markdown("---")
-    if st.button("🟢 Bonus Raporu", help="Bonus Raporu uygulamasına git"):
-        st.markdown("""
-        <script>
-        window.open('https://bonusraporu.streamlit.app/', '_blank');
-        </script>
-        """, unsafe_allow_html=True)
-        st.info("🔗 Yeni sekmede açılıyor: https://bonusraporu.streamlit.app/")
 
 # CSS stilleri ekleme
 st.markdown("""
@@ -1395,7 +1311,7 @@ def sort_requests_by_status_and_date(requests):
 # Streamlit UI
 col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
 with col1:
-    st.title("💰 BetConstruct Raporlama Sistemi")
+    st.title("")
 with col2:
     # Seçilen talep bilgisi
     if 'selected_request_for_action' in st.session_state:
@@ -1453,7 +1369,7 @@ if st.session_state.get('show_settings', False):
                 st.rerun()
 
 # Tab sistemi ekle
-tab1, tab2, tab3, tab4 = st.tabs(["💰 Çekim Talepleri", "📊 Bahis Raporu", "📈 Performans Analizi", "🏆 Bonus Raporu"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["💰 Çekim Talepleri", "📊 Bahis Raporu", "📈 Performans Analizi", "🏆 Bonus Raporu", "📅 Shift Planı"])
 
 with tab1:
     st.markdown("---")
@@ -1771,33 +1687,30 @@ with tab1:
                 st.markdown("---")
                 st.subheader(f"✅ {len(selected_indices)} talep seçildi")
                 
-                col1, col2 = st.columns(2)
+                # Seçili taleplerin listesini al
+                selected_requests = [filtered_data[i] for i in selected_indices]
                 
-                with col1:
+                # Sadece BankTransferBME taleplerini filtrele
+                bank_requests = [req for req in selected_requests if req.get("PaymentSystemName") == "BankTransferBME"]
+                
+                # Çekim Raporu Oluştur butonu (sadece BankTransferBME seçiliyse aktif)
+                if bank_requests:
                     if st.button("📄 Çekim Raporu Oluştur", type="primary"):
-                        selected_requests = [filtered_data[i] for i in selected_indices]
-                        
-                        # BankTransferBME taleplerini filtrele
-                        bank_requests = [req for req in selected_requests if req.get("PaymentSystemName") == "BankTransferBME"]
-                        
-                        if bank_requests:
-                            report = create_withdrawal_report(bank_requests)
-                            if report:
-                                st.success("✅ Çekim raporu hazırlandı!")
-                                
-                                # JavaScript tabanlı kopyalama butonu ile raporu göster
-                                st.markdown("### 📄 Çekim Raporu")
-                                create_copy_button(report, "📋 Çekim Raporunu Kopyala", "withdrawal_report")
-                            else:
-                                st.warning("⚠️ Rapor oluşturulamadı - veri eksik olabilir")
+                        report = create_withdrawal_report(bank_requests)
+                        if report:
+                            st.success("✅ Çekim raporu hazırlandı!")
+                            # JavaScript tabanlı kopyalama butonu ile raporu göster
+                            st.markdown("### 📄 Çekim Raporu")
+                            create_copy_button(report, "📋 Çekim Raporunu Kopyala", "withdrawal_report")
                         else:
-                            st.warning("⚠️ Seçilen talepler arasında BankTransferBME ödeme sistemi bulunamadı")
-            
-            with col2:
-                if st.button("🚨 Fraud Raporu Oluştur", type="secondary"):
-                    if len(selected_indices) == 1:
-                        # Tek bir talep seçildiyse fraud raporu oluştur
-                        selected_request = filtered_data[selected_indices[0]]
+                            st.warning("⚠️ Rapor oluşturulamadı - veri eksik olabilir")
+                else:
+                    st.warning("⚠️ Seçilen talepler arasında BankTransferBME ödeme sistemi bulunamadı")
+                
+                # Fraud Raporu Oluştur butonu (sadece tek bir talep seçiliyse aktif)
+                if len(selected_indices) == 1:
+                    if st.button("🚨 Fraud Raporu Oluştur", type="secondary"):
+                        selected_request = selected_requests[0]
                         client_id = selected_request.get("ClientId")
                         
                         if client_id:
@@ -1806,7 +1719,6 @@ with tab1:
                                 
                                 if fraud_report:
                                     st.success("✅ Fraud raporu hazırlandı!")
-                                    
                                     # JavaScript tabanlı kopyalama butonu ile raporu göster
                                     st.markdown("### 🚨 Fraud Raporu")
                                     create_copy_button(fraud_report, "📋 Fraud Raporunu Kopyala", "fraud_report")
@@ -1814,8 +1726,6 @@ with tab1:
                                     st.error("❌ Fraud raporu oluşturulamadı")
                         else:
                             st.error("❌ Client ID bulunamadı")
-                    else:
-                        st.warning("⚠️ Fraud raporu için sadece 1 talep seçin")
             
             # İstatistikler
             st.markdown("---")
@@ -2034,10 +1944,6 @@ with tab2:
             - **GetClientPendingSportsBets**: Bekleyen bahisler
             """)
 
-# Footer
-st.markdown("---")
-st.markdown("*BetConstruct Çekim Raporlama Sistemi*")
-
 
 
 
@@ -2170,6 +2076,10 @@ class BonusAPIHandler:
             
             if response.status_code == 200:
                 data = response.json()
+                print("\n=== HAM API YANITI ===")
+                print(json.dumps(data, indent=2, ensure_ascii=False))
+                print("====================\n")
+                
                 df = self.process_api_response(data, filters.get("bonus_types"))
                 return {
                     "success": True,
@@ -2227,15 +2137,45 @@ class BonusAPIHandler:
                         if not bonus_match:
                             continue
                     
-                    processed_data.append({
+                    # Kullanıcı adını al, eğer yoksa kırmızı ile işaretle
+                    created_by = str(bonus.get("CreatedByUserName", ""))
+                    created_by_style = ""
+                    if not created_by:
+                        created_by = "Belirtilmemiş"
+                        created_by_style = "background-color: #ffcccc;"  # Açık kırmızı arkaplan
+                    
+                    # ResultType'a göre sonuç durumunu belirle
+                    result_type = bonus.get("ResultType", -1)
+                    result_mapping = {
+                        0: "Beklemede",
+                        1: "Ödendi",
+                        2: "Kaybedildi",
+                        3: "İptal Edildi",
+                        4: "Süresi Doldu"
+                    }
+                    result_status = result_mapping.get(int(result_type), "Bilinmeyen")
+                    
+                    # Renk kodlarını belirle
+                    result_style = ""
+                    if result_type == 1:  # Ödendi
+                        result_style = "background-color: #ccffcc;"  # Açık yeşil
+                    elif result_type in [2, 3, 4]:  # Kaybedildi, İptal Edildi, Süresi Doldu
+                        result_style = "background-color: #ffe6e6;"  # Açık kırmızı
+                    
+                    # Veriyi işle
+                    row_data = {
                         'Kullanıcı ID': str(bonus.get("ClientId", "")),
                         'Kullanıcı Adı': str(bonus.get("ClientName", "")),
                         'Bonus Türü': bonus_name,
                         'Miktar': float(bonus.get("Amount", 0)),
                         'Para Birimi': str(bonus.get("ClientCurrency", "TRY")),
-                        'Durum': self.get_bonus_status(bonus.get("AcceptanceType", 0)),
+                        'Sonuç': result_status,
+                        'Sonuç_Renk': result_style,  # Stil bilgisi
+                        'Tarafından Oluşturuldu': created_by,
+                        'Tarafından Oluşturuldu_Renk': created_by_style,  # Stil bilgisi
                         'Tarih': str(bonus.get("AcceptanceDateLocal", ""))
-                    })
+                    }
+                    processed_data.append(row_data)
             
             return pd.DataFrame(processed_data)
             
@@ -2783,7 +2723,49 @@ with tab3:
             fig2 = px.pie(perf_df, names="Personel", values="İşlemAdedi", title="İşlem Dağılımı")
             st.plotly_chart(fig2, use_container_width=True)
 
-        fig3 = px.bar(perf_df, x="Personel", y="OrtalamaSüre", title="Ortalama Süre (dakika)", color="OrtalamaSüre")
+        # Renk skalasını özelleştir: 10 dakikaya kadar mavi, 20'ye kadar sarı, sonrası kırmızı
+        max_duration = max(perf_df["OrtalamaSüre"].max(), 30)  # Minimum 30 dakika yükseklik olsun
+        
+        # Renk skalasını oluştur
+        color_scale = [
+            [0.0, "#1f77b4"],    # Koyu mavi
+            [10/max_duration, "#1f77b4"],  # 10. dakikaya kadar mavi
+            [10.1/max_duration, "#ffd700"],  # 10'dan sonra sarı
+            [20/max_duration, "#ffd700"],    # 20'ye kadar sarı
+            [20.1/max_duration, "#ff0000"],  # 20'den sonra kırmızı
+            [1.0, "#ff0000"]     # En yüksek değer için koyu kırmızı
+        ]
+        
+        fig3 = px.bar(
+            perf_df, 
+            x="Personel", 
+            y="OrtalamaSüre", 
+            title="Ortalama İşlem Süresi (dakika)", 
+            color="OrtalamaSüre",
+            color_continuous_scale=color_scale,
+            range_color=[0, max_duration]
+        )
+        
+        # Grafik düzenlemeleri
+        fig3.update_layout(
+            coloraxis_colorbar=dict(
+                title="Dakika",
+                thicknessmode="pixels", thickness=20,
+                lenmode="pixels", len=200,
+                yanchor="top", y=1,
+                xanchor="left", x=1.1,
+                ticks="outside"
+            ),
+            yaxis_title="Ortalama Süre (dakika)",
+            xaxis_title="Personel"
+        )
+        
+        # Çubukların üzerine değerleri yaz
+        fig3.update_traces(
+            texttemplate='%{y:.1f}',
+            textposition='outside'
+        )
+        
         st.plotly_chart(fig3, use_container_width=True)
 
         # Performans tablosu
@@ -2889,8 +2871,61 @@ with tab4:
     if 'bonus_data' in st.session_state and not st.session_state.bonus_data.empty:
         st.subheader("📋 Bonus Raporu Sonuçları")
         
-        # Veri tablosu
-        st.dataframe(st.session_state.bonus_data, use_container_width=True, height=400)
+        # Stil fonksiyonları
+        def style_bonus_table(row):
+            styles = []
+            for col in row.index:
+                if col.endswith('_Renk'):
+                    continue  # Stil sütunlarını atla
+                    
+                style = ''
+                # Tarafından Oluşturuldu sütunu için stil
+                if col == 'Tarafından Oluşturuldu' and row.get('Tarafından Oluşturuldu_Renk'):
+                    style = row['Tarafından Oluşturuldu_Renk']
+                # Sonuç sütunu için stil
+                elif col == 'Sonuç' and row.get('Sonuç_Renk'):
+                    style = row['Sonuç_Renk']
+                
+                styles.append(style)
+            return styles
+        
+        # Sadece gösterilecek sütunları seç
+        display_columns = [
+            'Kullanıcı ID', 'Kullanıcı Adı', 'Bonus Türü', 'Miktar', 
+            'Para Birimi', 'Sonuç', 'Tarafından Oluşturuldu', 'Tarih'
+        ]
+        
+        # Stil uygulanmış tabloyu oluştur
+        st.markdown("""
+        <style>
+            .dataframe th, .dataframe td {
+                text-align: left !important;
+                padding: 8px !important;
+            }
+            .dataframe th {
+                background-color: #f8f9fa !important;
+                font-weight: bold !important;
+            }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Veriyi formatla ve göster
+        display_df = st.session_state.bonus_data[display_columns].copy()
+        
+        # Miktar sütununu formatla
+        if 'Miktar' in display_df.columns:
+            display_df['Miktar'] = display_df['Miktar'].apply(
+                lambda x: f"₺{float(x):,.2f}".replace(".", "X").replace(",", ".").replace("X", ",") 
+                if pd.notnull(x) else ""
+            )
+        
+        # Tabloyu göster
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            height=400,
+            hide_index=True
+        )
         
         # Özet bilgiler
         col1, col2, col3 = st.columns(3)
@@ -3015,10 +3050,589 @@ with tab4:
             st.session_state.bonus_data = pd.DataFrame()
         st.info("📝 Bonus raporu getirmek için yukarıdaki butona tıklayın.")
 
+# ===== SHIFT PLANI FONKSİYONLARI =====
+
+class ShiftType(Enum):
+    MORNING = ("09:00-17:00", "#FFD700", "#000000")  # Altın rengi
+    AFTERNOON = ("13:00-21:00", "#FF8C00", "#FFFFFF")  # Koyu turuncu
+    EVENING = ("17:00-01:00", "#8B0000", "#FFFFFF")  # Koyu kırmızı
+    NIGHT = ("01:00-09:00", "#00008B", "#FFFFFF")  # Koyu mavi
+    DAY = ("11:00-19:00", "#32CD32", "#000000")  # Açık yeşil
+    GRAVEYARD = ("00:00-08:00", "#4B0082", "#FFFFFF")  # Çivit mavisi
+    LATE_AFTERNOON = ("15:00-23:00", "#8B4513", "#FFFFFF")  # Kahverengi
+    OFF = ("OFF", "#666666", "#FFFFFF")  # Koyu gri, daha belirgin
+    ANNUAL_LEAVE = ("Y.İZİN", "#FF1493", "#FFFFFF")  # Daha belirgin pembe
+    
+    def __init__(self, display, bg_color, text_color):
+        self.display = display
+        self.bg_color = bg_color
+        self.text_color = text_color
+        
+    def __str__(self):
+        return self.display
+
+class Department(Enum):
+    FINANCE = "Finans"
+    CALL = "Çağrı Merkezi"
+    FINANCE_MANAGER = "Finans Yetkili"
+    
+    def __str__(self):
+        return self.value
+
+class Employee:
+    def __init__(self, name: str, department: Department, annual_leave: int = 14, excuse_leave: int = 5):
+        self.name = name
+        self.department = department
+        self.annual_leave = annual_leave
+        self.excuse_leave = excuse_leave
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "department": self.department.value,
+            "annual_leave": self.annual_leave,
+            "excuse_leave": self.excuse_leave
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'Employee':
+        # Handle department name migration from old to new values
+        dept_mapping = {
+            'Call': 'Çağrı Merkezi',
+            'Finans': 'Finans',
+            'Finans Yetkili': 'Finans Yetkili'
+        }
+        
+        # Get the department value, handling both old and new formats
+        dept_value = data["department"]
+        if dept_value in dept_mapping:
+            dept_value = dept_mapping[dept_value]
+            
+        # Ensure we have a valid department
+        try:
+            department = Department(dept_value)
+        except ValueError:
+            # If still invalid, default to 'Finans'
+            department = Department.FINANCE
+            
+        return cls(
+            name=data["name"],
+            department=department,
+            annual_leave=data.get("annual_leave", 14),
+            excuse_leave=data.get("excuse_leave", 5)
+        )
+
+def get_week_dates(year: int, week: int) -> List[date]:
+    """Verilen yıl ve hafta numarasına göre haftanın günlerini döndürür."""
+    first_day = date(year, 1, 1)
+    base = first_day - timedelta(days=first_day.weekday())
+    week_start = base + timedelta(weeks=week-1)
+    return [week_start + timedelta(days=i) for i in range(7)]
+
+def save_employees(employees: List[Employee]):
+    """Personel listesini JSON dosyasına kaydeder."""
+    data = [emp.to_dict() for emp in employees]
+    with open('employees.json', 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def load_employees() -> List[Employee]:
+    """JSON dosyasından personel listesini yükler."""
+    if not os.path.exists('employees.json'):
+        return []
+    
+    try:
+        with open('employees.json', 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        employees = []
+        for emp_data in data:
+            try:
+                employees.append(Employee.from_dict(emp_data))
+            except Exception as e:
+                print(f"Error loading employee {emp_data.get('name', 'unknown')}: {str(e)}")
+                continue
+                
+        # Save the updated employee data if any migrations were applied
+        if employees:
+            save_employees(employees)
+            
+        return employees
+        
+    except Exception as e:
+        print(f"Error loading employees: {str(e)}")
+        return []
+
+def save_shifts(shifts: Dict[str, Dict[str, str]]):
+    """Vardiya bilgilerini JSON dosyasına kaydeder."""
+    with open('shifts.json', 'w', encoding='utf-8') as f:
+        json.dump(shifts, f, ensure_ascii=False, indent=2)
+
+def load_shifts() -> Dict[str, Dict[str, str]]:
+    """JSON dosyasından vardiya bilgilerini yükler."""
+    if not os.path.exists('shifts.json'):
+        return {}
+    
+    with open('shifts.json', 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+def get_shift_style(shift_value):
+    """Vardiya değerine göre stil döndürür."""
+    if not shift_value:
+        return ""
+    
+    for shift in ShiftType:
+        if shift.display == shift_value:
+            return f"background-color: {shift.bg_color}; color: {shift.text_color}; border-radius: 4px; padding: 2px 4px; font-size: 0.85em;"
+    
+    return ""
+
+def render_shift_plan_tab():
+    """Shift Planı sekmesini oluşturur."""
+    st.markdown("""
+    <style>
+    .compact-table {
+        font-size: 0.8em !important;
+    }
+    .compact-table th {
+        padding: 0.2em 0.5em !important;
+    }
+    .compact-table td {
+        padding: 0.2em 0.5em !important;
+        text-align: center !important;
+    }
+    .department-header {
+        background-color: #f0f0f0;
+        font-weight: bold;
+        font-size: 0.9em;
+    }
+    .employee-name {
+        font-size: 0.85em;
+        white-space: nowrap;
+        padding: 2px 5px;
+    }
+    .preview-container {
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 10px !important;
+        margin: 10px 0 !important;
+        background-color: #ffffff;
+        box-shadow: 0 1px 5px rgba(0,0,0,0.05);
+        width: 100% !important;
+        box-sizing: border-box !important;
+        transform: scale(1) !important;
+    }
+    
+    /* Make the preview table more compact */
+    .preview-container table {
+        border-collapse: collapse;
+        width: 100% !important;
+        margin: 0 !important;
+    }
+    
+    .preview-container th, 
+    .preview-container td {
+        padding: 2px 4px !important;
+        font-size: 0.8em !important;
+        line-height: 1.2 !important;
+    }
+    
+    .preview-container th {
+        background-color: #f8f9fa !important;
+        font-weight: 600 !important;
+    }
+    
+    /* Make the shift cells more compact */
+    .shift-cell {
+        padding: 1px 3px !important;
+        margin: 0 !important;
+        font-size: 0.75em !important;
+        min-width: 60px !important;
+        height: 24px !important;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .preview-title {
+        font-size: 1.2em;
+        font-weight: bold;
+        margin-bottom: 10px;
+        color: #333;
+    }
+    .shift-cell {
+        padding: 3px 6px;
+        border-radius: 4px;
+        font-size: 0.8em;
+        text-align: center;
+        margin: 1px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.header("📅 Shift Planı")
+    
+    # Session state'leri başlat
+    if 'employees' not in st.session_state:
+        st.session_state.employees = load_employees()
+    if 'shifts' not in st.session_state:
+        st.session_state.shifts = load_shifts()
+    
+    # Varsayılan olarak bir sonraki haftayı ayarla
+    today = date.today()
+    next_week_date = today + timedelta(weeks=1)
+    current_week = next_week_date.isocalendar()[1]
+    current_year = next_week_date.year
+    
+    if 'current_week' not in st.session_state:
+        st.session_state.current_week = current_week
+    if 'current_year' not in st.session_state:
+        st.session_state.current_year = current_year
+    
+    # Hafta seçimi
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col1:
+        if st.button("← Önceki Hafta"):
+            if st.session_state.current_week > 1:
+                st.session_state.current_week -= 1
+            else:
+                st.session_state.current_week = 52
+                st.session_state.current_year -= 1
+            st.rerun()
+    
+    with col2:
+        st.markdown(f"### {st.session_state.current_year} Yılı {st.session_state.current_week}. Hafta")
+    
+    with col3:
+        if st.button("Sonraki Hafta →"):
+            if st.session_state.current_week < 52:
+                st.session_state.current_week += 1
+            else:
+                st.session_state.current_week = 1
+                st.session_state.current_year += 1
+            st.rerun()
+    
+    # Haftanın günlerini al
+    week_dates = get_week_dates(st.session_state.current_year, st.session_state.current_week)
+    
+    # Personel ekleme formu
+    with st.expander("➕ Personel Ekle"):
+        with st.form("add_employee_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                new_name = st.text_input("Ad Soyad")
+            with col2:
+                new_dept = st.selectbox("Departman", [dept.value for dept in Department])
+            
+            col3, col4 = st.columns(2)
+            with col3:
+                annual_leave = st.number_input("Yıllık İzin (Gün)", min_value=0, value=14)
+            with col4:
+                excuse_leave = st.number_input("Mazeret İzni (Gün)", min_value=0, value=5)
+            
+            if st.form_submit_button("Ekle"):
+                if new_name and new_dept:
+                    new_employee = Employee(
+                        name=new_name,
+                        department=Department(new_dept),
+                        annual_leave=annual_leave,
+                        excuse_leave=excuse_leave
+                    )
+                    st.session_state.employees.append(new_employee)
+                    save_employees(st.session_state.employees)
+                    st.success(f"{new_name} başarıyla eklendi!")
+                    st.rerun()
+    
+    # Ana içerik düzeni - Personel listesi kapalı başlasın
+    col1, col2 = st.columns([1, 4])
+    
+    with col1:
+        # Personel listesi için genişletilebilir bölüm
+        with st.expander("👥 Personel Listesi", expanded=False):
+            # Departman filtreleme
+            selected_dept = st.selectbox(
+                "Departman Filtrele",
+                ["Tümü"] + [dept.value for dept in Department],
+                key="dept_filter",
+                label_visibility="collapsed"
+            )
+            
+            # Personel listesi
+            st.markdown("<div style='max-height: 500px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 5px;'>", unsafe_allow_html=True)
+            
+            # Departmanlara göre grupla
+            employees_by_dept = {}
+            for emp in st.session_state.employees:
+                if selected_dept == "Tümü" or emp.department.value == selected_dept:
+                    if emp.department.value not in employees_by_dept:
+                        employees_by_dept[emp.department.value] = []
+                    employees_by_dept[emp.department.value].append(emp)
+            
+            # Departmanları değerlerine göre sırala ve göster
+            for dept_name, dept_employees in sorted(employees_by_dept.items(), key=lambda x: str(x[0])):
+                st.markdown(f"<div class='department-header'>{dept_name}</div>", unsafe_allow_html=True)
+                
+                for emp in sorted(dept_employees, key=lambda x: x.name):
+                    cols = st.columns([1, 0.2])
+                    with cols[0]:
+                        st.markdown(f"""
+                        <div class='employee-name'>
+                            {emp.name}
+                            <span style='font-size: 0.8em; color: #666;'>({emp.annual_leave}Y/{emp.excuse_leave}M)</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    with cols[1]:
+                        if st.button("✕", key=f"del_{emp.name}", help=f"{emp.name} kullanıcısını sil"):
+                            st.session_state.employees = [e for e in st.session_state.employees if e.name != emp.name]
+                            save_employees(st.session_state.employees)
+                            st.rerun()
+                
+                st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("### Vardiya Planı")
+        
+        # Haftalık görünüm düğmeleri
+        week_nav_cols = st.columns([1, 2, 1])
+        with week_nav_cols[0]:
+            if st.button("← Önceki Hafta", use_container_width=True):
+                if st.session_state.current_week > 1:
+                    st.session_state.current_week -= 1
+                else:
+                    st.session_state.current_week = 52
+                    st.session_state.current_year -= 1
+                st.rerun()
+        
+        with week_nav_cols[1]:
+            st.markdown(f"<div style='text-align: center; font-weight: bold;'>{st.session_state.current_year} Yılı {st.session_state.current_week}. Hafta</div>", unsafe_allow_html=True)
+        
+        with week_nav_cols[2]:
+            if st.button("Sonraki Hafta →", use_container_width=True):
+                if st.session_state.current_week < 52:
+                    st.session_state.current_week += 1
+                else:
+                    st.session_state.current_week = 1
+                    st.session_state.current_year += 1
+                st.rerun()
+        
+        # Vardiya tablosu
+        st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+        
+        # Departmanlara göre grupla
+        employees_by_dept = {}
+        for emp in st.session_state.employees:
+            if selected_dept == "Tümü" or emp.department.value == selected_dept:
+                if emp.department.value not in employees_by_dept:
+                    employees_by_dept[emp.department.value] = []
+                employees_by_dept[emp.department.value].append(emp)
+        
+        # Her departman için ayrı bir tablo oluştur
+        for dept_name, dept_employees in sorted(employees_by_dept.items()):
+            st.markdown(f"<div class='department-header' style='margin-top: 15px;'>{dept_name}</div>", unsafe_allow_html=True)
+            
+            # Başlıklar
+            cols = st.columns(8)
+            # Türkçe gün isimleri için mapping
+            turkish_days = {
+                'Mon': 'Pzt',
+                'Tue': 'Sal',
+                'Wed': 'Çar',
+                'Thu': 'Per',
+                'Fri': 'Cum',
+                'Sat': 'Cmt',
+                'Sun': 'Paz'
+            }
+            headers = ["Personel"] + [f"{d.strftime('%d')}\n{turkish_days[d.strftime('%a')]}" for d in week_dates]
+            
+            for i, header in enumerate(headers):
+                with cols[i]:
+                    st.markdown(f"<div style='font-weight: bold; text-align: center; font-size: 0.85em;'>{header}</div>", unsafe_allow_html=True)
+            
+            # Vardiya satırları
+            for emp in sorted(dept_employees, key=lambda x: x.name):
+                cols = st.columns(8)
+                with cols[0]:
+                    st.markdown(f"<div class='employee-name'>{emp.name}</div>", unsafe_allow_html=True)
+                
+                for i, day in enumerate(week_dates, 1):
+                    date_str = day.strftime("%Y-%m-%d")
+                    shift_key = f"{emp.name}_{date_str}"
+                    
+                    if emp.name not in st.session_state.shifts:
+                        st.session_state.shifts[emp.name] = {}
+                    
+                    current_shift = st.session_state.shifts[emp.name].get(date_str, "")
+                    
+                    with cols[i]:
+                        shift_options = [""] + [shift.display for shift in ShiftType]
+                        selected_shift = st.selectbox(
+                            f"{emp.name} - {day.strftime('%a %d.%m')}",
+                            options=shift_options,
+                            index=shift_options.index(current_shift) if current_shift in shift_options else 0,
+                            key=f"shift_{emp.name}_{date_str}",
+                            label_visibility="visible"
+                        )
+                        
+                        if selected_shift != current_shift:
+                            st.session_state.shifts[emp.name][date_str] = selected_shift
+                            save_shifts(st.session_state.shifts)
+                            st.rerun()
+                        
+                        # Seçili vardiyanın reklini güncelle
+                        if selected_shift:
+                            style = get_shift_style(selected_shift)
+                            st.markdown(f"<div style='{style}'>{selected_shift}</div>", unsafe_allow_html=True)
+        
+        # Vardiya açıklamaları
+        st.markdown("---")
+        st.markdown("**Vardiya Renkleri:**")
+        
+        # Vardiya renk açıklamalarını göster
+        shift_cols = st.columns(4)
+        for i, shift in enumerate(ShiftType):
+            with shift_cols[i % 4]:
+                st.markdown(
+                    f"<div style='background-color: {shift.bg_color}; color: {shift.text_color}; "
+                    f"padding: 2px 5px; border-radius: 4px; margin: 2px 0; font-size: 0.85em;'>{shift.display}</div>",
+                    unsafe_allow_html=True
+                )
+        
+        # Kaydet butonu ve Önizleme bölümü
+        save_cols = st.columns([1, 2, 1])
+        with save_cols[1]:
+            if st.button("💾 Değişiklikleri Kaydet ve Önizle", use_container_width=True, type="primary"):
+                save_shifts(st.session_state.shifts)
+                st.session_state.last_saved_plan = {
+                    'year': st.session_state.current_year,
+                    'week': st.session_state.current_week,
+                    'shifts': st.session_state.shifts.copy(),
+                    'employees': [emp.__dict__ for emp in st.session_state.employees]
+                }
+                st.session_state.show_preview = True
+                st.rerun()
+        
+        # Önizleme alanı - ayrı bir bölüm olarak
+        if 'show_preview' in st.session_state and st.session_state.show_preview and 'last_saved_plan' in st.session_state:
+            st.markdown("<div id='preview-section'></div>", unsafe_allow_html=True)  # Preview section anchor
+            with st.expander("📋 Kayıtlı Plan Önizleme", expanded=True):
+                st.markdown("<div class='preview-container'>", unsafe_allow_html=True)
+                st.markdown(f"<div class='preview-title'>{st.session_state.last_saved_plan['year']} Yılı {st.session_state.last_saved_plan['week']}. Hafta Vardiya Planı</div>", unsafe_allow_html=True)
+                
+                # Haftanın tarihlerini al
+                preview_week_dates = get_week_dates(st.session_state.last_saved_plan['year'], st.session_state.last_saved_plan['week'])
+                
+                # Departmanlara göre grupla
+                employees_by_dept = {}
+                for emp in st.session_state.last_saved_plan['employees']:
+                    if emp['department'] not in employees_by_dept:
+                        employees_by_dept[emp['department']] = []
+                    employees_by_dept[emp['department']].append(emp)
+                
+                # Önizleme tablosu - Departmanları değerlerine göre sırala
+                for dept_name, dept_employees in sorted(employees_by_dept.items(), key=lambda x: str(x[0])):
+                    st.markdown(f"<div class='department-header'>{dept_name}</div>", unsafe_allow_html=True)
+                    
+                    # Başlıklar
+                    cols = st.columns(8)
+                    # Türkçe gün isimleri için mapping
+                    turkish_days = {
+                        'Mon': 'Pzt',
+                        'Tue': 'Sal',
+                        'Wed': 'Çar',
+                        'Thu': 'Per',
+                        'Fri': 'Cum',
+                        'Sat': 'Cmt',
+                        'Sun': 'Paz'
+                    }
+                    headers = ["Personel"] + [f"{d.strftime('%d')}\n{turkish_days[d.strftime('%a')]}" for d in preview_week_dates]
+                    
+                    for i, header in enumerate(headers):
+                        with cols[i]:
+                            st.markdown(f"<div style='font-weight: bold; text-align: center; font-size: 0.85em;'>{header}</div>", 
+                                      unsafe_allow_html=True)
+                    
+                    # Vardiya satırları
+                    for emp in sorted(dept_employees, key=lambda x: x['name']):
+                        cols = st.columns(8)
+                        with cols[0]:
+                            st.markdown(f"<div class='employee-name'>{emp['name']}</div>", unsafe_allow_html=True)
+                        
+                        for i, day in enumerate(preview_week_dates, 1):
+                            date_str = day.strftime("%Y-%m-%d")
+                            shift = st.session_state.last_saved_plan['shifts'].get(emp['name'], {}).get(date_str, "")
+                            
+                            with cols[i]:
+                                if shift:
+                                    style = get_shift_style(shift)
+                                    st.markdown(f"<div class='shift-cell' style='{style}'>{shift}</div>", unsafe_allow_html=True)
+                                else:
+                                    st.markdown("<div class='shift-cell'>-</div>", unsafe_allow_html=True)
+                    
+                        st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
+                
+                # Önizleme kapatma butonu
+                close_col1, close_col2 = st.columns([0.9, 0.1])
+                with close_col2:
+                    if st.button(
+                        "❌ Önizlemeyi Kapat", 
+                        key="close_preview_button",
+                        help="Önizleme ekranını kapatır",
+                        use_container_width=True,
+                        type="primary"
+                    ):
+                        st.session_state.show_preview = False
+                        st.rerun()
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+                
+                # CSS stilleri
+                st.markdown("""
+                <style>
+                /* Shift cell styles */
+                .shift-cell {
+                    padding: 2px 5px !important;
+                    margin: 0 !important;
+                    font-size: 0.8em !important;
+                    line-height: 1.2 !important;
+                    min-width: 80px;
+                    height: 30px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    text-align: center;
+                    border: 1px solid #ddd;
+                    border-radius: 3px;
+                }
+                
+                .employee-name {
+                    font-size: 0.8em !important;
+                    font-weight: bold;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                
+                /* Close button style */
+                div[data-testid="stButton"] > button[kind="primary"] {
+                    background-color: #f44336 !important;
+                    color: white !important;
+                    border: none !important;
+                    border-radius: 4px !important;
+                    font-weight: 600 !important;
+                    padding: 8px 16px !important;
+                    transition: background-color 0.2s !important;
+                }
+                div[data-testid="stButton"] > button[kind="primary"]:hover {
+                    background-color: #d32f2f !important;
+                }
+                </style>
+                """, unsafe_allow_html=True)
+                
+
 # Footer
-st.markdown("---")
-st.markdown("*BetConstruct Raporlama Sistemi v2.0*")
 
+# Shift Plan sekmesi
+with tab5:
+    render_shift_plan_tab()
 
-
-
+# Footer kaldırıldı
