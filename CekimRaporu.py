@@ -179,7 +179,7 @@ def load_config():
     """Konfigürasyon dosyasından ayarları yükle"""
     config_file = "config.json"
     default_config = {
-        "token": "2582007cbe97f891cf5fe69f4f2d44b002c021e6fca4c8276dc0accf4098d5fe",
+        "token": "0c5e573a9bfe5655084a747aaff9f462400f1e8d5766733bfc6e60b8dadeefb9",
         "api_url": "https://backofficewebadmin.betconstruct.com/api/tr/Client/GetClientWithdrawalRequestsWithTotals"
     }
     
@@ -3636,3 +3636,4 @@ with tab5:
     render_shift_plan_tab()
 
 # Footer kaldırıldı
+
